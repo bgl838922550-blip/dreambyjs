@@ -1,0 +1,14 @@
+{
+  "name": "可可影视示例源",
+  "apps": [
+    {
+      "key": "kkys04",
+      "name": "可可影视",
+      "api": "https://example.com/miniapps/kkys04-miniapp.js",
+      "searchable": 1,
+      "quickSearch": 1,
+      "aggregate": true,
+      "recordHistory": true
+    }
+  ]
+}
