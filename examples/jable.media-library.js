@@ -12,13 +12,13 @@ const JABLE_SEARCH_BLOCK = "list_videos_videos_list_search_result";
 
 const JABLE_HEADERS = {
   "User-Agent":
-    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36",
-  Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
-  Referer: `${JABLE_BASE_URL}/`,
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
+  Accept:
+    "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
 };
 
 const JABLE_PLAY_HEADERS = {
-  ...JABLE_HEADERS,
+  "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
   Origin: JABLE_BASE_URL,
 };
 
@@ -266,7 +266,36 @@ const JABLE_EXTRA_CATEGORY_SHORTCUTS = [
 
 const JABLE_ALL_CATEGORIES = dedupeCategoryDefinitions([...JABLE_CATEGORIES, ...JABLE_EXTRA_CATEGORY_SHORTCUTS]);
 
-const JABLE_HOME_CATEGORY_IDS = ["hot", "new-release", "chinese-subtitle", "uncensored-leak", "roleplay"];
+const JABLE_HOME_CATEGORY_IDS = [
+  "hot",
+  "new-release",
+  "chinese-subtitle",
+  "uncensored-leak",
+  "roleplay",
+  "category-uniform",
+  "category-sex-only",
+  "category-pov",
+  "category-uncensored",
+  "category-lesbian",
+  "tag-black-pantyhose",
+  "tag-pantyhose",
+  "tag-school-uniform",
+  "tag-cosplay",
+  "tag-ntr",
+  "tag-time-stop",
+  "tag-private-cam",
+  "tag-big-tits",
+  "tag-mature-woman",
+  "tag-creampie",
+  "tag-blowjob",
+  "models-yua-mikami",
+  "models-saika-kawakita",
+  "models-otsuki-hibiki",
+  "models-julia",
+  "models-momonogi-kana",
+  "models-nanasawa-mia",
+  "models-honjou-suzu",
+];
 
 var WidgetMetadata = {
   id: "baiplay_jable_media_library",
@@ -335,6 +364,52 @@ async function init(cfg = {}) {
   };
 }
 
+function getManifest() {
+  return {
+    id: WidgetMetadata.id,
+    name: "Jable",
+    title: "Jable",
+    version: WidgetMetadata.version || "1.0.0",
+    author: WidgetMetadata.author || "baiPlay",
+    description: WidgetMetadata.description,
+    site: JABLE_BASE_URL,
+    capabilities: {
+      home: true,
+      category: true,
+      detail: true,
+      search: true,
+      resourceVersions: true,
+      playback: true,
+      aggregation: true,
+      playbackHistory: true,
+      resourceMatching: true,
+      resourceMatch: {
+        enabled: true,
+        parameters: [
+          "tmdbId",
+          "imdbId",
+          "tvdbId",
+          "title",
+          "originalTitle",
+          "alternativeTitles",
+          "year",
+          "runtimeMinutes",
+          "mediaType",
+          "seasonNumber",
+          "episodeNumber",
+          "episodeTitle",
+          "episodeRuntimeMinutes",
+        ],
+      },
+    },
+    aggregation: {
+      search: true,
+      playbackHistory: true,
+      resourceMatching: true,
+    },
+  };
+}
+
 async function getCategories() {
   return JABLE_ALL_CATEGORIES.map((category) => ({
     id: category.id,
@@ -346,6 +421,85 @@ async function getCategories() {
     sourceId: WidgetMetadata.id,
     sortOptions: category.sortOptions || defaultSortOptions(),
   }));
+}
+
+async function getHome(ctx = {}) {
+  const ext = argsify(ctx);
+  const page = normalizePage(ext.page || ext.pg || ext.from || 1);
+  const categoryIds = Array.isArray(ext.categoryIds) && ext.categoryIds.length ? ext.categoryIds : JABLE_HOME_CATEGORY_IDS;
+  const sections = [
+    {
+      id: "jable-categories",
+      title: "\u5206\u7c7b",
+      style: "discover.watchProviders",
+      items: categoryShortcutItems(),
+    },
+  ];
+  let hero = [];
+  let firstError = null;
+
+  for (const categoryId of categoryIds) {
+    const category = findCategory(categoryId);
+    try {
+      const items = await loadPosterWall({
+        categoryId: category.id,
+        page,
+        sort_by: ext.sort_by || ext.sortBy || category.defaultSort,
+      });
+      const mediaItems = items.map((item, index) => toMiniMediaItem(item, index + 1, category)).filter(Boolean);
+      if (!mediaItems.length) continue;
+      if (!hero.length) hero = mediaItems.slice(0, 6);
+      const action = { type: "category", id: category.id, pageId: category.id, title: category.title };
+      sections.push({
+        id: category.id,
+        title: category.title,
+        style: homeSectionStyle(category),
+        contentType: "movie",
+        more: action,
+        moreAction: action,
+        items: mediaItems.slice(0, SOURCE_PAGE_LIMIT),
+      });
+    } catch (error) {
+      if (!firstError) firstError = error;
+      logInfo("Jable home section skipped: " + category.id + " - " + (error && error.message ? error.message : error));
+    }
+  }
+
+  if (!hero.length && firstError) {
+    throw firstError;
+  }
+
+  const result = {
+    pageType: "home",
+    title: "Jable",
+    sections,
+  };
+  if (hero.length) result.hero = hero;
+  return result;
+}
+
+async function getCategory(ctx = {}) {
+  const ext = argsify(ctx);
+  const pageId = ext.pageId || ext.categoryId || ext.tid || ext.id || "hot";
+  const page = normalizePage(ext.page || ext.pg || ext.from || 1);
+  const category = findCategory(pageId);
+  const sortBy = ext.sort_by || ext.sortBy || ext.sort || category.defaultSort;
+  const items = await loadPosterWall({ categoryId: category.id, page, sort_by: sortBy });
+
+  return {
+    pageType: "category",
+    id: category.id,
+    title: ext.title || category.title || "\u5206\u7c7b",
+    style: "media.posterGrid",
+    page,
+    hasMore: items.length >= SOURCE_PAGE_LIMIT,
+    sort: (category.sortOptions || defaultSortOptions()).map((sort) => ({
+      id: sort.id || sort.value,
+      title: sort.title,
+      value: sort.value || sort.id,
+    })),
+    items: items.map((item, index) => toMiniMediaItem(item, (page - 1) * SOURCE_PAGE_LIMIT + index + 1, category)).filter(Boolean),
+  };
 }
 
 async function home(filter = true) {
@@ -387,6 +541,7 @@ async function homeSections(params = {}) {
       id: category.id,
       title: category.title,
       type: "posterWall",
+      style: homeSectionStyle(category),
       items,
       list: items.map(toVodItem),
     });
@@ -433,30 +588,57 @@ async function getItems(params = {}) {
 }
 
 async function search(paramsOrKeyword = {}, quick = false, pg = 1) {
+  const parsedArgs = argsify(paramsOrKeyword);
+  if (typeof paramsOrKeyword === "string" && Object.keys(parsedArgs).length) {
+    return getSearchPage(parsedArgs);
+  }
+  if (typeof paramsOrKeyword === "string" && arguments.length <= 1) {
+    return getSearchPage({ keyword: paramsOrKeyword, page: 1 });
+  }
   if (typeof paramsOrKeyword === "string" || arguments.length > 1) {
     const items = await searchLibrary({ keyword: paramsOrKeyword, from: pg });
     return toSourcePage(items, pg);
   }
-  if (paramsOrKeyword && typeof paramsOrKeyword === "object" && paramsOrKeyword.wd) {
+  if (paramsOrKeyword && typeof paramsOrKeyword === "object" && paramsOrKeyword.wd && !paramsOrKeyword.keyword && !paramsOrKeyword.query) {
     const page = normalizePage(paramsOrKeyword.page || paramsOrKeyword.pg || paramsOrKeyword.from || 1);
     const items = await searchLibrary({ keyword: paramsOrKeyword.wd, from: page });
     return toSourcePage(items, page);
   }
-  return searchLibrary(paramsOrKeyword);
+  return getSearchPage(paramsOrKeyword);
+}
+
+async function getSearchPage(ctx = {}) {
+  const ext = argsify(ctx);
+  const keyword = String(ext.keyword || ext.query || ext.text || ext.wd || "").trim();
+  const page = normalizePage(ext.page || ext.pg || ext.from || 1);
+  const items = keyword ? await searchLibrary({ keyword, from: page, sort_by: ext.sort_by || ext.sortBy }) : [];
+  return {
+    pageType: "search",
+    keyword,
+    title: keyword ? `\u641c\u7d22\u7ed3\u679c: ${keyword}` : "\u641c\u7d22\u7ed3\u679c",
+    page,
+    hasMore: items.length >= SOURCE_PAGE_LIMIT,
+    items: items.map((item, index) => toMiniMediaItem(item, (page - 1) * SOURCE_PAGE_LIMIT + index + 1, { title: "\u641c\u7d22" })),
+  };
+}
+
+async function onSearch(ctx = {}) {
+  return getSearchPage(ctx);
 }
 
 async function searchLibrary(params = {}) {
-  const keyword = String(params.keyword || params.query || "").trim();
+  const ext = argsify(params);
+  const keyword = String(ext.keyword || ext.query || ext.text || ext.wd || "").trim();
   if (!keyword) {
     return [];
   }
 
-  const page = normalizePage(params.page || params.from);
+  const page = normalizePage(ext.page || ext.pg || ext.from);
   const encodedKeyword = encodeURIComponent(keyword);
   let url = `${JABLE_BASE_URL}/search/${encodedKeyword}/?mode=async&function=get_block&block_id=${JABLE_SEARCH_BLOCK}&q=${encodedKeyword}`;
 
-  if (params.sort_by || params.sortBy) {
-    url += `&sort_by=${encodeURIComponent(params.sort_by || params.sortBy)}`;
+  if (ext.sort_by || ext.sortBy) {
+    url += `&sort_by=${encodeURIComponent(ext.sort_by || ext.sortBy)}`;
   }
   if (page) {
     url += `&from=${page}`;
@@ -472,13 +654,23 @@ async function loadPage(params = {}) {
 }
 
 async function loadPageSections(params = {}) {
-  const url = params.url;
+  let url = params.url;
   if (!url) {
     throw new Error("Jable list url is required.");
   }
+  if (params.sort_by) {
+    url += `&sort_by=${params.sort_by}`;
+  }
+  if (params.from) {
+    url += `&from=${params.from}`;
+  }
 
   const response = await httpGet(url, { headers: JABLE_HEADERS });
-  const htmlContent = getResponseText(response);
+  if (!response || !response.data || typeof response.data !== "string") {
+    throw new Error("\u65e0\u6cd5\u83b7\u53d6\u6709\u6548\u7684HTML\u5185\u5bb9");
+  }
+
+  const htmlContent = response.data;
   if (!htmlContent) {
     throw new Error("Jable returned empty list html.");
   }
@@ -569,9 +761,10 @@ function parseHtmlWithRegexItems(htmlContent) {
 }
 
 async function getDetail(input) {
-  const link = getLink(input);
+  const ext = argsify(input);
+  const link = getLink(Object.keys(ext).length ? ext : input);
   const detail = await loadDetail(link);
-  return normalizeDetail(detail, input);
+  return normalizeDetail(detail, Object.keys(ext).length ? ext : input);
 }
 
 async function detail(idsOrInput) {
@@ -592,28 +785,32 @@ async function loadDetail(link) {
   const pageUrl = getLink(link);
   const response = await httpGet(pageUrl, {
     headers: {
-      ...JABLE_HEADERS,
+      "User-Agent": JABLE_HEADERS["User-Agent"],
       Referer: JABLE_BASE_URL + "/",
     },
   });
-  const html = getResponseText(response);
+  if (!response || !response.data || typeof response.data !== "string") {
+    throw new Error("\u65e0\u6cd5\u83b7\u53d6\u6709\u6548\u7684HTML\u5185\u5bb9");
+  }
+  const html = response.data;
   if (!html) {
     throw new Error("Jable returned empty detail html.");
   }
 
-  const hlsUrl = extractHlsUrl(html);
+  const match = html.match(/var\s+hlsUrl\s*=\s*['"](.*?)['"]/i);
+  const hlsUrl = match && match[1] ? match[1] : "";
   if (!hlsUrl) {
-    throw new Error("Cannot extract Jable HLS url. The page may require verification.");
+    throw new Error("\u65e0\u6cd5\u83b7\u53d6\u6709\u6548\u7684\u64ad\u653e\u5730\u5740\uff0c\u53ef\u80fd\u9700\u8981\u4ee3\u7406\u9a8c\u8bc1");
   }
 
   const metadata = extractDetailMetadata(html, pageUrl);
   return {
     id: pageUrl,
-    type: "detail",
+    type: "movie",
     title: metadata.title,
     name: metadata.title,
     link: pageUrl,
-    videoUrl: absolutizeUrl(hlsUrl, pageUrl),
+    videoUrl: hlsUrl,
     posterPath: metadata.poster,
     backdropPath: metadata.poster,
     mediaType: "movie",
@@ -633,30 +830,31 @@ async function loadDetail(link) {
 }
 
 async function matchMedia(params = {}) {
-  const link = getLink(params);
+  const ext = argsify(params);
+  const link = getLink(ext);
   if (isJableVideoUrl(link)) {
     const detail = await getDetail(link);
     return [{ score: 1, reason: "direct-link", item: detail }];
   }
 
   const keyword = firstNonEmpty(
-    params.keyword,
-    params.query,
-    params.jableCode,
-    extractJavCode(params.title || params.name || params.originalTitle || ""),
-    params.title,
-    params.name,
-    params.originalTitle
+    ext.keyword,
+    ext.query,
+    ext.jableCode,
+    extractJavCode(ext.title || ext.name || ext.originalTitle || ""),
+    ext.title,
+    ext.name,
+    ext.originalTitle
   );
 
   if (!keyword) {
     return [];
   }
 
-  const results = await search({ keyword, from: 1 });
+  const results = await searchLibrary({ keyword, from: 1 });
   const ranked = results
     .map((item) => ({
-      score: scoreMatch(item, params, keyword),
+      score: scoreMatch(item, ext, keyword),
       reason: "search",
       item,
     }))
@@ -666,8 +864,56 @@ async function matchMedia(params = {}) {
   return ranked;
 }
 
+async function matchResources(ctx = {}) {
+  const ext = argsify(ctx);
+  const titles = unique(
+    []
+      .concat(ext.keyword || ext.query || [])
+      .concat(ext.jableCode || [])
+      .concat(ext.title || ext.name || [])
+      .concat(ext.originalTitle || ext.originalName || [])
+      .concat(ext.alternativeTitles || [])
+      .concat(ext.searchTitles || [])
+      .concat(ext.titles || [])
+  ).slice(0, 5);
+  const results = [];
+  const seen = {};
+
+  for (let index = 0; index < titles.length && results.length < 8; index += 1) {
+    const keyword = firstNonEmpty(extractJavCode(titles[index]), titles[index]);
+    if (!keyword) continue;
+    const matches = await matchMedia({ ...ext, keyword, query: keyword });
+    for (const match of matches) {
+      const item = toMiniMediaItem(match.item, results.length + 1, { title: "Jable" });
+      if (!item || seen[item.id]) continue;
+      seen[item.id] = true;
+      item.score = match.score;
+      item.matchReason = match.reason;
+      results.push(item);
+      if (results.length >= 8) break;
+    }
+  }
+
+  return { results };
+}
+
+async function matchMovie(ctx = {}) {
+  return matchResources(ctx);
+}
+
+async function matchEpisode(ctx = {}) {
+  return matchResources(ctx);
+}
+
 async function getPlayback(input) {
-  const detail = input && input.videoUrl ? input : await getDetail(input);
+  const ext = argsify(input);
+  if (ext.url || ext.playUrl || ext.videoUrl) {
+    return playbackFromDirectUrl(ext.url || ext.playUrl || ext.videoUrl, ext);
+  }
+  const detail = input && input.videoUrl ? input : await getDetail(Object.keys(ext).length ? ext : input);
+  if (!detail.videoUrl) {
+    throw new Error("Cannot extract Jable HLS url. The page may require browser verification or the video source is not public.");
+  }
   return {
     id: detail.id,
     title: detail.title || detail.name,
@@ -683,6 +929,28 @@ async function getPlayback(input) {
       Referer: detail.link || detail.id,
     },
     mediaSourceId: `${detail.id}#hls`,
+  };
+}
+
+async function getResourceVersions(ctx = {}) {
+  const detail = await getDetail(ctx);
+  return detail.resourceGroups || [];
+}
+
+async function resolvePlayback(ctx = {}) {
+  const ext = argsify(ctx);
+  if (ext.url || ext.playUrl || ext.videoUrl) {
+    return playbackFromDirectUrl(ext.url || ext.playUrl || ext.videoUrl, ext);
+  }
+  const playback = await getPlayback(ext);
+  return {
+    url: playback.url,
+    container: playback.container || "m3u8",
+    headers: playback.headers || playback.header || {},
+    subtitles: [],
+    danmaku: null,
+    startPosition: 0,
+    preferDirectAVPlayer: true,
   };
 }
 
@@ -772,7 +1040,20 @@ function normalizeDetail(detail, originalInput) {
   return {
     ...base,
     ...detail,
+    pageType: "detail",
+    type: "movie",
+    poster: detail.posterPath || base.posterPath || "",
+    backdrop: detail.backdropPath || detail.posterPath || base.backdropPath || "",
     overview: detail.description,
+    genres: detail.tags || [],
+    cast: (detail.actors || []).map((name) => ({ id: name, name })),
+    resourceGroups: buildMiniResourceGroups(detail),
+    resourceSummary: {
+      versionCount: detail.videoUrl ? 1 : 0,
+      episodeCount: 0,
+      defaultVersionId: detail.videoUrl ? `${detail.id}#hls` : "",
+    },
+    recommendations: [],
     mediaSources: [
       {
         id: `${detail.id}#hls`,
@@ -786,6 +1067,129 @@ function normalizeDetail(detail, originalInput) {
       },
     ],
   };
+}
+
+function categoryShortcutItems() {
+  return JABLE_ALL_CATEGORIES.slice(0, 48).map((category) => ({
+    id: category.id,
+    title: category.title,
+    subtitle: category.group || "Jable",
+    type: "collection",
+    action: { type: "category", id: category.id, pageId: category.id, title: category.title },
+  }));
+}
+
+function homeSectionStyle(category) {
+  const group = String((category && category.group) || "");
+  const kind = String((category && category.kind) || "");
+  const id = String((category && category.id) || "");
+  if (kind === "tag" || kind === "category") return "discover.spotlight";
+  if (/衣着|剧情|地点|身材|职业|交合|玩法|主题|杂项/.test(group)) return "discover.spotlight";
+  if (/^tag-|^category-/.test(id)) return "discover.spotlight";
+  return "discover.standard";
+}
+
+function toMiniMediaItem(item, rank, category) {
+  if (!item) return null;
+  const link = getLink(item);
+  const id = link || item.id || item.itemId;
+  const title = cleanText(item.title || item.name || item.vod_name || "");
+  if (!id || !title) return null;
+  const poster = firstNonEmpty(item.poster, item.posterPath, item.backdrop, item.backdropPath, item.thumbnailURL, item.vod_pic);
+  const remarks = firstNonEmpty(item.remarks, item.durationText, item.releaseDate, item.vod_remarks);
+  const subtitle = firstNonEmpty(item.subtitle, remarks, item.genreTitle, category && category.title);
+  const badges = []
+    .concat(item.badges || [])
+    .concat(category && category.title ? [category.title] : [])
+    .filter(Boolean)
+    .slice(0, 4);
+
+  return {
+    id,
+    title,
+    subtitle,
+    type: "movie",
+    poster,
+    backdrop: firstNonEmpty(item.backdrop, item.backdropPath, poster),
+    overview: item.overview || item.description || item.vod_content || "",
+    year: item.year || undefined,
+    rating: item.rating || undefined,
+    rank,
+    remarks,
+    badges,
+    providerIds: {
+      jable: id,
+      source: WidgetMetadata.id,
+    },
+    action: { type: "detail", id, itemId: id },
+  };
+}
+
+function buildMiniResourceGroups(detail) {
+  if (!detail || !detail.videoUrl) return [];
+  const itemId = detail.link || detail.id;
+  const versionId = `${itemId}#hls`;
+  const title = detail.title || detail.name || "Jable HLS";
+  return [
+    {
+      id: "online",
+      title: "\u5728\u7ebf\u64ad\u653e",
+      versions: [
+        {
+          id: versionId,
+          title: "Jable HLS",
+          name: "Jable HLS",
+          subtitle: firstNonEmpty(detail.durationText, "\u76f4\u63a5\u64ad\u653e\u5730\u5740"),
+          quality: "",
+          sourceName: "Jable",
+          availability: "playable",
+          container: "m3u8",
+          url: detail.videoUrl,
+          headers: detail.customHeaders,
+          default: true,
+          action: {
+            type: "play",
+            itemId,
+            versionId,
+            url: detail.videoUrl,
+            title,
+          },
+        },
+      ],
+    },
+  ];
+}
+
+function playbackFromDirectUrl(url, ext = {}) {
+  const link = absolutizeUrl(url);
+  const referer = firstNonEmpty(ext.referer, ext.refererUrl, ext.itemId, ext.link, ext.id, JABLE_BASE_URL + "/");
+  const container = inferContainer(link);
+  const headers = ext.headers || ext.header || ext.customHeaders || { ...JABLE_PLAY_HEADERS, Referer: absolutizeUrl(referer) };
+  return {
+    id: ext.versionId || ext.id || link,
+    title: ext.title || ext.name || "Jable HLS",
+    url: link,
+    videoUrl: link,
+    type: container === "m3u8" ? "hls" : container,
+    protocol: container === "m3u8" ? "hls" : "",
+    container,
+    mimeType: container === "m3u8" ? "application/vnd.apple.mpegurl" : "",
+    playerType: "ijk",
+    headers,
+    subtitles: [],
+    danmaku: null,
+    startPosition: 0,
+    preferDirectAVPlayer: container === "m3u8" || container === "mpd" || container === "ts",
+    mediaSourceId: ext.versionId || `${link}#direct`,
+  };
+}
+
+function inferContainer(url) {
+  const value = String(url || "").split("?")[0].split("#")[0].toLowerCase();
+  const match = value.match(/\.([a-z0-9]+)$/);
+  if (!match) return "";
+  if (match[1] === "m3u" || match[1] === "m3u8") return "m3u8";
+  return match[1];
 }
 
 function toSourceClass(category) {
@@ -1052,6 +1456,25 @@ function hasWidgetHtml() {
   return typeof Widget !== "undefined" && Widget.html && typeof Widget.html.load === "function";
 }
 
+function argsify(ctx) {
+  if (!ctx) return {};
+  if (typeof ctx === "string") {
+    const value = ctx.trim();
+    if (!value) return {};
+    if ((value.startsWith("{") && value.endsWith("}")) || (value.startsWith("[") && value.endsWith("]"))) {
+      try {
+        const parsed = JSON.parse(value);
+        return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
+      } catch (error) {
+        return {};
+      }
+    }
+    return {};
+  }
+  if (typeof ctx === "object" && !Array.isArray(ctx)) return ctx;
+  return {};
+}
+
 function getLink(input) {
   if (!input) {
     return "";
@@ -1059,7 +1482,7 @@ function getLink(input) {
   if (typeof input === "string") {
     return absolutizeUrl(input);
   }
-  return absolutizeUrl(firstNonEmpty(input.link, input.url, input.id, input.videoId));
+  return absolutizeUrl(firstNonEmpty(input.link, input.itemId, input.url, input.playUrl, input.videoUrl, input.versionId, input.id, input.videoId));
 }
 
 function firstSourceId(input) {
@@ -1218,6 +1641,16 @@ function firstNonEmpty(...values) {
   return "";
 }
 
+function logInfo(value) {
+  if (typeof $log !== "undefined" && $log && typeof $log.info === "function") {
+    $log.info(value);
+    return;
+  }
+  if (typeof console !== "undefined" && console && typeof console.log === "function") {
+    console.log(value);
+  }
+}
+
 function unique(items) {
   return [...new Set(items.filter(Boolean))];
 }
@@ -1237,6 +1670,9 @@ const JableMediaLibrary = {
   metadata: WidgetMetadata,
   categories: JABLE_ALL_CATEGORIES,
   init,
+  getManifest,
+  getHome,
+  getCategory,
   home,
   homeVod,
   homeContent,
@@ -1252,9 +1688,16 @@ const JableMediaLibrary = {
   getItems,
   getPosterWall: loadPosterWall,
   getDetail,
+  getResourceVersions,
+  resolvePlayback,
+  matchResources,
+  matchMovie,
+  matchEpisode,
   matchMedia,
   getPlayback,
   search,
+  getSearch: getSearchPage,
+  onSearch,
   searchLibrary,
   loadPage,
   loadPageSections,
@@ -1269,6 +1712,16 @@ if (typeof globalThis !== "undefined") {
   globalThis.JableMediaLibrary = JableMediaLibrary;
   globalThis.WidgetMetadata = WidgetMetadata;
   globalThis.init = init;
+  globalThis.getManifest = getManifest;
+  globalThis.getHome = getHome;
+  globalThis.getCategory = getCategory;
+  globalThis.getResourceVersions = getResourceVersions;
+  globalThis.resolvePlayback = resolvePlayback;
+  globalThis.matchResources = matchResources;
+  globalThis.matchMovie = matchMovie;
+  globalThis.matchEpisode = matchEpisode;
+  globalThis.getSearch = getSearchPage;
+  globalThis.onSearch = onSearch;
   globalThis.home = home;
   globalThis.homeVod = homeVod;
   globalThis.homeContent = homeContent;
