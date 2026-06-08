@@ -57,16 +57,49 @@ function media(id, index) {
     rank: index,
     remarks: index % 2 === 0 ? '4K' : 'HD',
     badges: ['示例', 'JS'],
+    aspectRatio: '16:9',
     action: { type: 'detail', itemId: id }
+  };
+}
+
+function categoryEntry(id, title, index, previewItems) {
+  return {
+    id,
+    title,
+    subtitle: `${previewItems.length} 项内容`,
+    type: 'collection',
+    poster: previewItems[0]?.backdrop || backdrop,
+    backdrop: previewItems[0]?.backdrop || backdrop,
+    overview: `浏览${title}中的代表性影视资源。`,
+    metadataText: '分类入口',
+    badges: ['分类', '榜单'],
+    previewItems,
+    action: { type: 'category', pageId: id, title }
   };
 }
 
 function getHome() {
   const items = Array.from({ length: 12 }, (_, index) => media(`sample-${index + 1}`, index + 1));
+  const categoryItems = [
+    categoryEntry('annual-action', '动作精选', 1, items.slice(0, 3)),
+    categoryEntry('annual-drama', '剧情佳作', 2, items.slice(3, 6)),
+    categoryEntry('annual-animation', '动画推荐', 3, items.slice(6, 9)),
+    categoryEntry('annual-series', '剧集专题', 4, items.slice(9, 12))
+  ];
   return {
     pageType: 'home',
     title: '示例自定义媒体库',
+    heroAspectRatio: '16:9',
+    hero: items.slice(0, 6),
     sections: [
+      {
+        id: 'annual-categories',
+        title: '年度分类入口',
+        style: 'discover.annualListPreview',
+        lazy: true,
+        loadAction: { type: 'custom', id: 'annual-categories', title: '年度分类入口' },
+        items: categoryItems
+      },
       {
         id: 'ranked',
         title: '热门榜单',
@@ -98,6 +131,26 @@ function getHome() {
         style: 'media.posterGrid',
         items
       }
+    ]
+  };
+}
+
+function getHomeSection(ctx = {}) {
+  const sectionId = ctx.sectionId || ctx.id;
+  if (sectionId !== 'annual-categories') {
+    return { id: sectionId, title: ctx.title || '榜单', style: ctx.style || 'discover.standard', lazy: false, items: [] };
+  }
+  const items = Array.from({ length: 12 }, (_, index) => media(`sample-${index + 1}`, index + 1));
+  return {
+    id: 'annual-categories',
+    title: '年度分类入口',
+    style: 'discover.annualListPreview',
+    lazy: false,
+    items: [
+      categoryEntry('annual-action', '动作精选', 1, items.slice(0, 3)),
+      categoryEntry('annual-drama', '剧情佳作', 2, items.slice(3, 6)),
+      categoryEntry('annual-animation', '动画推荐', 3, items.slice(6, 9)),
+      categoryEntry('annual-series', '剧集专题', 4, items.slice(9, 12))
     ]
   };
 }

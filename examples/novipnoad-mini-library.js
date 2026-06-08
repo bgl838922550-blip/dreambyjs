@@ -12,38 +12,84 @@ const UA =
   'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1';
 
 const CATEGORY_SHORTCUTS = [
-  { id: '/', title: '首页', subtitle: 'NO视频推荐' },
-  { id: '/movie/', title: '电影', subtitle: '电影片库' },
-  { id: '/tv/western/', title: '欧美剧', subtitle: '欧美剧集' },
-  { id: '/tv/japan/', title: '日剧', subtitle: '日本剧集' },
-  { id: '/tv/korea/', title: '韩剧', subtitle: '韩国剧集' },
-  { id: '/tv/hongkong/', title: '港剧', subtitle: '香港剧集' },
-  { id: '/tv/taiwan/', title: '台剧', subtitle: '台湾剧集' },
-  { id: '/tv/thailand/', title: '泰剧', subtitle: '泰国剧集' },
-  { id: '/tv/turkey/', title: '土耳其剧', subtitle: '土耳其剧集' },
-  { id: '/anime/', title: '动画', subtitle: '动画与番剧' },
-  { id: '/shows/', title: '综艺', subtitle: '综艺节目' },
-  { id: '/music/', title: '音乐', subtitle: '音乐现场与 MV' },
-  { id: '/short/', title: '短片', subtitle: '短片合集' },
-  { id: '/other/', title: '其他', subtitle: '其他视频' }
+  { id: '/', title: '首页', subtitle: 'NO视频推荐', group: '推荐', kind: 'home', style: 'discover.annualWidePreview' },
+  { id: '/movie/', title: '电影', subtitle: '电影片库', group: '片库', kind: 'movie' },
+  { id: '/anime/', title: '动画', subtitle: '动画与番剧', group: '片库', kind: 'series' },
+  { id: '/shows/', title: '综艺', subtitle: '综艺节目', group: '片库', kind: 'series' },
+  { id: '/tv/western/', title: '欧美剧', subtitle: '欧美剧集', group: '剧集地区', kind: 'series' },
+  { id: '/tv/japan/', title: '日剧', subtitle: '日本剧集', group: '剧集地区', kind: 'series' },
+  { id: '/tv/korea/', title: '韩剧', subtitle: '韩国剧集', group: '剧集地区', kind: 'series' },
+  { id: '/tv/hongkong/', title: '港剧', subtitle: '香港剧集', group: '剧集地区', kind: 'series' },
+  { id: '/tv/taiwan/', title: '台剧', subtitle: '台湾剧集', group: '剧集地区', kind: 'series' },
+  { id: '/tv/thailand/', title: '泰剧', subtitle: '泰国剧集', group: '剧集地区', kind: 'series' },
+  { id: '/tv/turkey/', title: '土耳其剧', subtitle: '土耳其剧集', group: '剧集地区', kind: 'series' },
+  { id: '/music/', title: '音乐', subtitle: '音乐现场与 MV', group: '其他', kind: 'movie' },
+  { id: '/short/', title: '短片', subtitle: '短片合集', group: '其他', kind: 'movie' },
+  { id: '/other/', title: '其他', subtitle: '其他视频', group: '其他', kind: 'movie' }
 ];
+
+const HOME_MEDIA_SECTIONS = [
+  { id: 'novip-home-featured', title: '首页推荐', pageId: '/', style: 'discover.spotlight', promotesToHero: true, contentType: 'mixed' },
+  { id: 'novip-home-movie', title: '电影', pageId: '/movie/', style: 'discover.ranked', contentType: 'movie' },
+  { id: 'novip-home-western', title: '欧美剧', pageId: '/tv/western/', style: 'discover.spotlight', contentType: 'series' },
+  { id: 'novip-home-japan', title: '日剧', pageId: '/tv/japan/', style: 'discover.editorial', contentType: 'series' },
+  { id: 'novip-home-korea', title: '韩剧', pageId: '/tv/korea/', style: 'discover.posterCompact', contentType: 'series' },
+  { id: 'novip-home-anime', title: '动画', pageId: '/anime/', style: 'discover.spotlight', contentType: 'series' },
+  { id: 'novip-home-shows', title: '综艺', pageId: '/shows/', style: 'discover.posterCompact', contentType: 'series' }
+];
+
+const HOME_SECTION_DEFINITIONS = [
+  { id: 'novip-categories', title: '分类入口', style: 'discover.annualWidePreview', ids: ['/', '/movie/', '/anime/', '/shows/'] },
+  {
+    id: 'novip-tv-regions',
+    title: '剧集地区',
+    style: 'discover.annualListPreview',
+    ids: ['/tv/western/', '/tv/japan/', '/tv/korea/', '/tv/hongkong/', '/tv/taiwan/', '/tv/thailand/', '/tv/turkey/']
+  },
+  { id: 'novip-more-library', title: '更多内容', style: 'discover.annualPosterStack', ids: ['/music/', '/short/', '/other/'] }
+];
+
+const CATEGORY_PREVIEW_ITEM_LIMIT = 10;
+const CATEGORY_PREVIEW_CACHE = {};
+const MINI_LIBRARY_ITEM_ASPECT_RATIO = '2:3';
+const MINI_LIBRARY_HERO_ASPECT_RATIO = '16:9';
+
+const WidgetMetadata = {
+  id: 'baiplay_novipnoad_media_library',
+  title: 'NO视频',
+  name: 'NO视频',
+  logo: NOVIPNOAD_LOGO,
+  icon: NOVIPNOAD_LOGO,
+  site: BASE,
+  version: '1.1.0',
+  author: 'baiPlay',
+  description:
+    'NO视频自定义媒体库示例。首页按自定义媒体库协议懒加载；站点启用 Cloudflare 时仍由 App 浏览器代理或 cf_clearance Cookie 处理。'
+};
 
 function getManifest() {
   return {
-    id: 'novipnoad',
-    name: 'NO视频',
-    version: '1.0.0',
-    author: 'baiPlay',
-    logo: NOVIPNOAD_LOGO,
-    description:
-      'NO视频自定义媒体库示例。站点主页启用了 Cloudflare 浏览器校验，纯 HTTP 运行环境可能需要写入 novipnoad.cf.cookie 或由 App 提供浏览器代理请求。',
+    id: WidgetMetadata.id,
+    name: WidgetMetadata.name,
+    title: WidgetMetadata.title,
+    version: WidgetMetadata.version,
+    author: WidgetMetadata.author,
+    logo: WidgetMetadata.logo,
+    icon: WidgetMetadata.icon,
+    site: WidgetMetadata.site,
+    description: WidgetMetadata.description,
     capabilities: {
+      home: true,
+      category: true,
+      detail: true,
       search: true,
+      resourceVersions: true,
+      playback: true,
       aggregation: true,
       playbackHistory: true,
-      resourceMatching: true,
+      resourceMatching: false,
       resourceMatch: {
-        enabled: true,
+        enabled: false,
         parameters: [
           'tmdbId',
           'imdbId',
@@ -64,7 +110,7 @@ function getManifest() {
     aggregation: {
       search: true,
       playbackHistory: true,
-      resourceMatching: true
+      resourceMatching: false
     }
   };
 }
@@ -87,6 +133,22 @@ function pathId(url) {
   return value || '/';
 }
 
+function normalizePageId(value) {
+  let id = String(value || '/').trim();
+  id = id.replace(/^category:/, '');
+  if (!id) return '/';
+  if (/^https?:\/\//i.test(id)) return pathId(id);
+  if (id[0] !== '/') id = '/' + id;
+  return id;
+}
+
+function normalizeItemId(value) {
+  let id = String(value || '').trim();
+  id = id.replace(/^detail:/, '');
+  if (/^https?:\/\//i.test(id)) id = pathId(id);
+  return id;
+}
+
 function siteURL(path) {
   return absolute(path || '/', BASE);
 }
@@ -107,7 +169,14 @@ function requestURL(url, referer) {
   const cookie = getCookieHeader();
   if (cookie) headers.Cookie = cookie;
 
-  const result = Widget.http.get(url, { headers });
+  const result = Widget.http.get(url, {
+    headers,
+    useBrowserCookie: true,
+    attachBrowserCookie: true,
+    useBrowserFallback: true,
+    browserFallback: true,
+    allowBrowserFallback: true
+  });
   const data = typeof result.data === 'string' ? result.data : JSON.stringify(result.data || {});
   if (isCloudflareChallenge(data, result.status, result.headers || {})) {
     throw new Error(
@@ -162,7 +231,39 @@ function stripTags(value) {
 
 function firstMatch(html, pattern) {
   const match = pattern.exec(html || '');
-  return match ? match[1] : '';
+  if (!match) return '';
+  for (let index = 1; index < match.length; index += 1) {
+    if (match[index]) return match[index];
+  }
+  return '';
+}
+
+function firstNonEmptyValue() {
+  for (let index = 0; index < arguments.length; index += 1) {
+    const value = arguments[index];
+    if (value == null) continue;
+    const text = String(value).trim();
+    if (text) return text;
+  }
+  return '';
+}
+
+function mediaHrefPattern() {
+  return /\/(?:movie|tv|anime|shows|music|short|other)\/[^"'\s<>]+\.html/i;
+}
+
+function metaContent(html, key, value) {
+  const source = String(html || '');
+  const tagPattern = /<meta\b[^>]*>/gi;
+  let match;
+  while ((match = tagPattern.exec(source))) {
+    const tag = match[0] || '';
+    const tagValue = attr(tag, key);
+    if (tagValue && tagValue.toLowerCase() === String(value || '').toLowerCase()) {
+      return attr(tag, 'content');
+    }
+  }
+  return '';
 }
 
 function attr(block, name) {
@@ -266,18 +367,70 @@ function parseEpisodeNumber(text, fallback) {
 }
 
 function parseVideoItemBlocks(html) {
+  const source = html || '';
   const blocks = [];
   const pattern = /<div\b[^>]*class\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))[^>]*>/gi;
   let match;
-  while ((match = pattern.exec(html || ''))) {
+  while ((match = pattern.exec(source))) {
     const classes = String(match[1] || match[2] || match[3] || '').split(/\s+/);
-    if (classes.indexOf('video-item') >= 0) blocks.push(match.index);
+    if (
+      classes.indexOf('video-item') >= 0 ||
+      classes.indexOf('post-item') >= 0 ||
+      classes.indexOf('grid-item') >= 0 ||
+      classes.indexOf('movie-item') >= 0 ||
+      classes.indexOf('item') >= 0 && mediaHrefPattern().test(source.slice(match.index, match.index + 900))
+    ) {
+      blocks.push(match.index);
+    }
   }
   const output = [];
   for (let index = 0; index < blocks.length; index += 1) {
-    output.push((html || '').slice(blocks[index], index + 1 < blocks.length ? blocks[index + 1] : html.length));
+    output.push(source.slice(blocks[index], index + 1 < blocks.length ? blocks[index + 1] : source.length));
   }
   return output;
+}
+
+function parseAnchorItemBlocks(html) {
+  const source = String(html || '');
+  const output = [];
+  const seen = {};
+  const pattern = /<a\b([^>]*)>([\s\S]*?)<\/a>/gi;
+  let match;
+  while ((match = pattern.exec(source))) {
+    const href = attr(match[1] || '', 'href');
+    if (!mediaHrefPattern().test(href)) continue;
+    const id = pathId(href);
+    if (!id || seen[id]) continue;
+    seen[id] = true;
+    output.push(expandAnchorBlock(source, match.index, pattern.lastIndex, match[0]));
+  }
+  return output;
+}
+
+function expandAnchorBlock(source, anchorStart, anchorEnd, anchorHTML) {
+  const before = source.slice(Math.max(0, anchorStart - 1800), anchorStart);
+  const after = source.slice(anchorEnd, Math.min(source.length, anchorEnd + 2200));
+  const containerStartRel = Math.max(
+    before.lastIndexOf('<article'),
+    before.lastIndexOf('<li'),
+    before.lastIndexOf('<div'),
+    before.lastIndexOf('<section')
+  );
+  const start = containerStartRel >= 0 ? Math.max(0, anchorStart - before.length + containerStartRel) : anchorStart;
+  const closeCandidates = ['</article>', '</li>', '</div>', '</section>']
+    .map(function (tag) {
+      const index = source.indexOf(tag, anchorEnd);
+      return index >= 0 ? index + tag.length : -1;
+    })
+    .filter(function (index) {
+      return index > anchorEnd;
+    })
+    .sort(function (left, right) {
+      return left - right;
+    });
+  const end = closeCandidates[0] || Math.min(source.length, anchorEnd + after.length);
+  const block = source.slice(start, end);
+  return mediaHrefPattern().test(block) ? block : anchorHTML;
 }
 
 function parseCard(block, fallbackTitle, rank) {
@@ -289,7 +442,7 @@ function parseCard(block, fallbackTitle, rank) {
   while ((linkMatch = linkPattern.exec(block || ''))) {
     const candidateAttrs = linkMatch[1] || '';
     const candidateHref = attr(candidateAttrs, 'href');
-    if (/\/(?:movie|tv|anime|shows|music|short|other)\/[^"'\s<>]+\.html/i.test(candidateHref)) {
+    if (mediaHrefPattern().test(candidateHref)) {
       href = candidateHref;
       linkAttrs = candidateAttrs;
       linkInner = linkMatch[2] || '';
@@ -301,9 +454,12 @@ function parseCard(block, fallbackTitle, rank) {
   const id = pathId(href);
   const rawTitle =
     stripTags(firstMatch(block, /<h3[^>]*>\s*<a[^>]*>([\s\S]*?)<\/a>\s*<\/h3>/i)) ||
+    stripTags(firstMatch(block, /<h[23][^>]*>([\s\S]*?)<\/h[23]>/i)) ||
     attr(linkAttrs, 'title') ||
     attr(linkInner, 'alt') ||
+    attr(block, 'alt') ||
     attr(block, 'title') ||
+    stripTags(linkInner) ||
     fallbackTitle ||
     id;
   const title = cleanMediaTitle(rawTitle);
@@ -316,6 +472,7 @@ function parseCard(block, fallbackTitle, rank) {
   return {
     id,
     title,
+    name: title,
     subtitle: typeLabel || fallbackTitle || '',
     type: mediaTypeFrom(href, rawTitle, block),
     poster: image,
@@ -326,21 +483,42 @@ function parseCard(block, fallbackTitle, rank) {
     year: parseYear(rawTitle),
     rank,
     remarks: parseRemarks(rawTitle, block),
+    metadataText: parseRemarks(rawTitle, block) || typeLabel || '',
     badges,
-    action: { type: 'detail', itemId: id }
+    providerIds: {
+      novipnoad: id,
+      source: WidgetMetadata.id
+    },
+    action: { type: 'detail', id, itemId: id }
   };
 }
 
 function parseCards(html, fallbackTitle) {
   const seen = {};
   const items = [];
-  parseVideoItemBlocks(html).forEach(function (block) {
+  const blocks = parseVideoItemBlocks(html).concat(parseAnchorItemBlocks(html));
+  blocks.forEach(function (block) {
     const card = parseCard(block, fallbackTitle, items.length + 1);
     if (!card || seen[card.id]) return;
     seen[card.id] = true;
     items.push(card);
   });
   return items;
+}
+
+function toHeroMediaItem(item) {
+  if (!item) return item;
+  const image = item.backdrop || item.poster;
+  item.backdrop = image || item.backdrop;
+  item.poster = image || item.poster;
+  item.aspectRatio = item.aspectRatio || MINI_LIBRARY_HERO_ASPECT_RATIO;
+  return item;
+}
+
+function toPosterMediaItem(item) {
+  if (!item) return item;
+  item.aspectRatio = item.aspectRatio || MINI_LIBRARY_ITEM_ASPECT_RATIO;
+  return item;
 }
 
 function parseCarousel(html) {
@@ -351,6 +529,7 @@ function parseCarousel(html) {
     .slice(0, 14)
     .map(function (item) {
       item.backdrop = item.backdrop || item.poster;
+      item.aspectRatio = '16:9';
       return item;
     });
 }
@@ -378,8 +557,14 @@ function parseSmartBoxSections(html) {
       id: sectionId(title, index + 1),
       title,
       style: sectionStyle(title, block),
-      moreAction: moreHref ? { type: 'category', pageId: pathId(moreHref), title } : undefined,
-      items
+      moreAction: moreHref ? {
+        type: 'category',
+        id: pathId(moreHref),
+        pageId: pathId(moreHref),
+        title,
+        itemAspectRatio: MINI_LIBRARY_ITEM_ASPECT_RATIO
+      } : undefined,
+      items: items.map(toHeroMediaItem)
     });
   });
   return sections;
@@ -414,38 +599,323 @@ function sectionId(title, index) {
   );
 }
 
-function shortcutItems() {
-  return CATEGORY_SHORTCUTS.map(function (item) {
-    return {
-      id: item.id,
-      title: item.title,
-      subtitle: item.subtitle,
-      type: 'collection',
-      action: { type: 'category', pageId: item.id, title: item.title }
-    };
+function findCategory(pageId) {
+  const id = normalizePageId(pageId || '/');
+  return (
+    CATEGORY_SHORTCUTS.find(function (item) {
+      return item.id === id;
+    }) ||
+    CATEGORY_SHORTCUTS.find(function (item) {
+      return item.id.replace(/\/+$/, '') === String(id).replace(/\/+$/, '');
+    })
+  );
+}
+
+function categoryShortcutItems(categoryIds) {
+  const categories = (categoryIds && categoryIds.length ? categoryIds : CATEGORY_SHORTCUTS.map(function (item) { return item.id; }))
+    .map(findCategory)
+    .filter(Boolean);
+  return categories.map(function (category, index) {
+    return categoryShortcutItem(category, index + 1, []);
   });
 }
 
-function getHome() {
-  const html = fetchText('/');
-  const hero = parseCarousel(html);
-  const sections = parseSmartBoxSections(html);
-  sections.unshift({
-    id: 'novip-categories',
-    title: '分类',
-    style: 'discover.watchProviders',
-    items: shortcutItems()
+function categoryShortcutItemsWithPreviews(categoryIds, previewLimit) {
+  const categories = (categoryIds && categoryIds.length ? categoryIds : CATEGORY_SHORTCUTS.map(function (item) { return item.id; }))
+    .map(findCategory)
+    .filter(Boolean);
+  return categories.map(function (category, index) {
+    return categoryShortcutItem(category, index + 1, loadCategoryPreviewItems(category, previewLimit));
   });
+}
+
+function categoryShortcutItem(category, rank, previewItems) {
+  const previews = Array.isArray(previewItems) ? previewItems.slice(0, CATEGORY_PREVIEW_ITEM_LIMIT) : [];
+  const image = firstCategoryPreviewImage(previews) || NOVIPNOAD_LOGO;
+  const metadataText = category.group || '分类';
+  const item = {
+    id: 'category:' + category.id,
+    title: category.title,
+    name: category.title,
+    subtitle: category.subtitle || metadataText,
+    type: 'collection',
+    mediaType: 'collection',
+    poster: image,
+    backdrop: image,
+    overview: categoryOverview(category),
+    summary: categoryOverview(category),
+    plot: categoryOverview(category),
+    content: categoryOverview(category),
+    description: categoryOverview(category),
+    metadataText,
+    remarks: metadataText,
+    rank,
+    badges: [category.group || '分类', category.kind || 'NO视频'].filter(Boolean),
+    aspectRatio: MINI_LIBRARY_HERO_ASPECT_RATIO,
+    previewItems: previews,
+    action: {
+      type: 'category',
+      id: category.id,
+      pageId: category.id,
+      title: category.title,
+      itemAspectRatio: MINI_LIBRARY_ITEM_ASPECT_RATIO
+    },
+    providerIds: {
+      novipnoadCategory: category.id,
+      source: WidgetMetadata.id
+    }
+  };
+  return applyCategoryPreviewItems(item, previews);
+}
+
+function categoryOverview(category) {
+  return '浏览 NO视频 ' + (category.title || '分类') + ' 中的影视资源。';
+}
+
+function loadCategoryPreviewItems(category, limit) {
+  if (!category || !category.id) return [];
+  const displayLimit = Math.max(1, Math.min(CATEGORY_PREVIEW_ITEM_LIMIT, Number(limit || CATEGORY_PREVIEW_ITEM_LIMIT)));
+  const cacheKey = category.id;
+  if (CATEGORY_PREVIEW_CACHE[cacheKey]) return CATEGORY_PREVIEW_CACHE[cacheKey].slice(0, displayLimit);
+  try {
+    const html = fetchText(category.id);
+    const previews = parseCards(html, category.title)
+      .map(toHeroMediaItem)
+      .filter(function (item) {
+        return item && (item.backdrop || item.poster);
+      })
+      .slice(0, CATEGORY_PREVIEW_ITEM_LIMIT);
+    CATEGORY_PREVIEW_CACHE[cacheKey] = previews;
+    return previews.slice(0, displayLimit);
+  } catch (error) {
+    return [];
+  }
+}
+
+function cachedCategoryPreviewItems(category, limit) {
+  if (!category || !category.id) return [];
+  const displayLimit = Math.max(1, Math.min(CATEGORY_PREVIEW_ITEM_LIMIT, Number(limit || CATEGORY_PREVIEW_ITEM_LIMIT)));
+  return (CATEGORY_PREVIEW_CACHE[category.id] || []).slice(0, displayLimit);
+}
+
+function cacheCategoryPreviewItems(categoryOrPageId, items) {
+  const category = typeof categoryOrPageId === 'string' ? findCategory(categoryOrPageId) : categoryOrPageId;
+  if (!category || !category.id || !Array.isArray(items) || !items.length) return;
+  const previews = items
+    .map(toHeroMediaItem)
+    .filter(function (item) {
+      return item && (item.backdrop || item.poster);
+    })
+    .slice(0, CATEGORY_PREVIEW_ITEM_LIMIT);
+  if (previews.length) CATEGORY_PREVIEW_CACHE[category.id] = previews;
+}
+
+function applyCategoryPreviewItems(item, previewItems) {
+  if (!item || !Array.isArray(previewItems) || !previewItems.length) return item;
+  const previews = previewItems.slice(0, CATEGORY_PREVIEW_ITEM_LIMIT);
+  const image = firstCategoryPreviewImage(previews);
+  item.previewItems = previews;
+  if (image) {
+    item.poster = image;
+    item.backdrop = image;
+  }
+  item.subtitle = previews.length + ' 条代表内容';
+  item.metadataText = item.metadataText || item.subtitle;
+  return item;
+}
+
+function firstCategoryPreviewImage(previewItems) {
+  if (!Array.isArray(previewItems)) return '';
+  for (let index = 0; index < previewItems.length; index += 1) {
+    const item = previewItems[index] || {};
+    const image = item.backdrop || item.poster;
+    if (image) return image;
+  }
+  return '';
+}
+
+function previewLimitForSectionStyle(style) {
+  const value = String(style || '');
+  if (value === 'discover.annualWidePreview') return 5;
+  if (value === 'discover.annualListPreview') return 3;
+  if (value === 'discover.annualPosterStack') return 4;
+  return CATEGORY_PREVIEW_ITEM_LIMIT;
+}
+
+function lazyHomeDefinitionSection(definition, items, isLazy) {
   return {
-    pageType: 'home',
-    title: 'NO视频',
-    hero,
-    sections
+    id: definition.id,
+    title: definition.title,
+    style: definition.style,
+    lazy: isLazy !== false,
+    isLazy: isLazy !== false,
+    moreAction: items[0] && items[0].action ? {
+      type: 'category',
+      id: items[0].action.id,
+      pageId: items[0].action.pageId,
+      title: definition.title,
+      itemAspectRatio: MINI_LIBRARY_ITEM_ASPECT_RATIO
+    } : undefined,
+    loadAction: { type: 'custom', id: definition.id, title: definition.title },
+    items
   };
 }
 
+function lazyHomeMediaSection(definition, index) {
+  return {
+    id: definition.id,
+    title: definition.title,
+    style: definition.style,
+    contentType: definition.contentType,
+    lazy: true,
+    isLazy: true,
+    promotesToHero: !!definition.promotesToHero,
+    moreAction: {
+      type: 'category',
+      id: definition.pageId,
+      pageId: definition.pageId,
+      title: definition.title,
+      itemAspectRatio: MINI_LIBRARY_ITEM_ASPECT_RATIO
+    },
+    loadAction: { type: 'custom', id: definition.id, pageId: definition.pageId, title: definition.title },
+    items: [],
+    rank: index
+  };
+}
+
+function completedHomeMediaSection(definition, items, index) {
+  return {
+    id: definition.id,
+    title: definition.title,
+    style: definition.style,
+    contentType: definition.contentType,
+    lazy: false,
+    isLazy: false,
+    promotesToHero: !!definition.promotesToHero,
+    moreAction: {
+      type: 'category',
+      id: definition.pageId,
+      pageId: definition.pageId,
+      title: definition.title,
+      itemAspectRatio: MINI_LIBRARY_ITEM_ASPECT_RATIO
+    },
+    loadAction: { type: 'custom', id: definition.id, pageId: definition.pageId, title: definition.title },
+    items: Array.isArray(items) ? items : [],
+    rank: index
+  };
+}
+
+function homeItemsFromHTML(html, definition) {
+  const groups = [];
+  if (definition.promotesToHero || definition.pageId === '/') groups.push(parseCarousel(html));
+  groups.push(parseCards(html, definition.title));
+  parseSmartBoxSections(html).forEach(function (section) {
+    groups.push(section.items || []);
+  });
+  const items = uniqueMediaItems(groups).map(toHeroMediaItem).slice(0, 18);
+  cacheCategoryPreviewItems(definition.pageId, items);
+  return items;
+}
+
+function uniqueMediaItems(groups) {
+  const seen = {};
+  const items = [];
+  (groups || []).forEach(function (group) {
+    (group || []).forEach(function (item) {
+      if (!item || !item.id || seen[item.id]) return;
+      seen[item.id] = true;
+      if (!item.rank) item.rank = items.length + 1;
+      items.push(item);
+    });
+  });
+  return items;
+}
+
+function homeSectionDefinition(ext) {
+  const sectionId = ext.sectionId || ext.id || ext.actionId || '';
+  const pageId = ext.pageId || ext.categoryId || '';
+  return (
+    HOME_MEDIA_SECTIONS.find(function (item) {
+      return item.id === sectionId;
+    }) ||
+    HOME_MEDIA_SECTIONS.find(function (item) {
+      return item.pageId === pageId;
+    })
+  );
+}
+
+function getHome() {
+  return {
+    pageType: 'home',
+    title: WidgetMetadata.title,
+    heroAspectRatio: MINI_LIBRARY_HERO_ASPECT_RATIO,
+    hero: [],
+    sections: HOME_MEDIA_SECTIONS.map(function (definition, index) {
+        return lazyHomeMediaSection(definition, index + 1);
+      }).concat(
+        HOME_SECTION_DEFINITIONS.map(function (definition) {
+          return lazyHomeDefinitionSection(definition, categoryShortcutItems(definition.ids), true);
+        })
+      )
+  };
+}
+
+function getHomeSection(ext) {
+  ext = ext || {};
+  const sectionId = ext.sectionId || ext.id || '';
+
+  const definitionSection = HOME_SECTION_DEFINITIONS.find(function (item) {
+    return item.id === sectionId;
+  });
+  if (definitionSection) {
+    return lazyHomeDefinitionSection(
+      definitionSection,
+      categoryShortcutItemsWithPreviews(definitionSection.ids, previewLimitForSectionStyle(definitionSection.style)),
+      false
+    );
+  }
+
+  const definition = homeSectionDefinition(ext) || {
+    id: sectionId || 'novip-home-unknown',
+    title: ext.title || '媒体',
+    pageId: ext.pageId || ext.categoryId || '/',
+    style: ext.style || 'discover.posterCompact'
+  };
+  const index =
+    HOME_MEDIA_SECTIONS.findIndex(function (item) {
+      return item.id === definition.id;
+    }) + 1;
+
+  try {
+    const html = fetchText(definition.pageId);
+    return completedHomeMediaSection(definition, homeItemsFromHTML(html, definition), index || 1);
+  } catch (error) {
+    return completedHomeMediaSection(definition, [], index || 1);
+  }
+}
+
+function home(ext) {
+  return getHome(ext || {});
+}
+
+function homeSection(ext) {
+  return getHomeSection(ext || {});
+}
+
+function getSection(ext) {
+  return getHomeSection(ext || {});
+}
+
+function section(ext) {
+  return getHomeSection(ext || {});
+}
+
+function loadSection(ext) {
+  return getHomeSection(ext || {});
+}
+
 function categoryPath(pageId, page) {
-  const id = pageId || '/';
+  const id = normalizePageId(pageId || '/');
   if (id === '/') return '/';
   if (/^https?:\/\//i.test(id)) return absolute(id).replace(BASE, '');
   const clean = id.split('?')[0].replace(/\/?$/, '/');
@@ -455,22 +925,28 @@ function categoryPath(pageId, page) {
 }
 
 function getCategory(ext) {
-  const pageId = ext.pageId || ext.id || '/';
+  const pageId = normalizePageId(ext.pageId || ext.id || '/');
   const page = Number(ext.page || 1);
   const path = categoryPath(pageId, page);
   const html = fetchText(path);
+  const category = findCategory(pageId);
   const title =
     ext.title ||
     stripTags(firstMatch(html, /<h2[^>]+class=["'][^"']*light-title[^"']*["'][^>]*>([\s\S]*?)<\/h2>/i)) ||
-    shortcutTitle(pageId) ||
+    (category && category.title) ||
     '分类';
   const sections = parseSmartBoxSections(html);
-  const items = parseCards(html, title);
+  const items = parseCards(html, title).map(toPosterMediaItem);
+  cacheCategoryPreviewItems(pageId, items);
   return {
     pageType: 'category',
     id: pageId,
     title,
     style: 'media.posterGrid',
+    itemAspectRatio: MINI_LIBRARY_ITEM_ASPECT_RATIO,
+    imageOrientation: 'portrait',
+    selectedSortValue: ext.sort || ext.sortBy || ext.sort_by || '',
+    sort: [],
     sections,
     items,
     page,
@@ -492,11 +968,61 @@ function hasNextPage(html, page) {
 }
 
 function parsePlayInfo(html) {
-  const block = firstMatch(html, /window\.playInfo\s*=\s*\{([\s\S]*?)\}\s*;?/i);
+  const source = String(html || '');
+  const block =
+    firstMatch(source, /(?:window\.)?playInfo\s*=\s*\{([\s\S]*?)\}\s*;?/i) ||
+    firstMatch(source, /(?:var|let|const)\s+playInfo\s*=\s*\{([\s\S]*?)\}\s*;?/i) ||
+    '';
+  const playerURL =
+    firstMatch(source, /<iframe\b[^>]+src\s*=\s*(?:"([^"]*player\.novipnoad\.net[^"]*)"|'([^']*player\.novipnoad\.net[^']*)'|([^\s>]*player\.novipnoad\.net[^\s>]*))/i) ||
+    firstMatch(source, /(https?:\/\/player\.novipnoad\.net\/v1\/\?[^"'<>\s]+)/i);
+  const playerQuery = parseQueryString(decodeEntities(playerURL));
+  const vid = firstNonEmptyValue(
+    firstMatch(block, /["']?vid["']?\s*:\s*["']([^"']+)["']/i),
+    firstMatch(block, /["']?url["']?\s*:\s*["']([^"']+)["']/i),
+    firstMatch(source, /\bdata-vid\s*=\s*(?:"([^"]+)"|'([^']+)'|([^\s>]+))/i),
+    firstMatch(source, /\bdata-url\s*=\s*(?:"([^"]+)"|'([^']+)'|([^\s>]+))/i),
+    firstMatch(source, /\bvid\s*=\s*["']([^"']+)["']/i),
+    playerQuery.url,
+    playerQuery.id
+  );
+  const pkey = firstNonEmptyValue(
+    firstMatch(block, /["']?pkey["']?\s*:\s*["']([^"']+)["']/i),
+    firstMatch(source, /\bdata-pkey\s*=\s*(?:"([^"]+)"|'([^']+)'|([^\s>]+))/i),
+    firstMatch(source, /\bdata-key\s*=\s*(?:"([^"]+)"|'([^']+)'|([^\s>]+))/i),
+    firstMatch(source, /\bpkey\s*=\s*["']([^"']+)["']/i),
+    playerQuery.pkey
+  );
   return {
-    vid: firstMatch(block, /vid\s*:\s*["']([^"']+)["']/i),
-    pkey: firstMatch(block, /pkey\s*:\s*["']([^"']+)["']/i)
+    playerURL: playerURL ? absolute(playerURL, PLAYER_BASE) : '',
+    vid: firstNonEmptyValue(
+      vid,
+      isPlayableURL(vid) ? vid : ''
+    ),
+    pkey
   };
+}
+
+function parseQueryString(url) {
+  const output = {};
+  const value = String(url || '');
+  const query = value.indexOf('?') >= 0 ? value.slice(value.indexOf('?') + 1) : value;
+  query.split('&').forEach(function (part) {
+    const pieces = part.split('=');
+    if (!pieces[0]) return;
+    const key = safeDecodeURIComponent(pieces[0]);
+    const raw = pieces.slice(1).join('=');
+    output[key] = safeDecodeURIComponent(raw || '');
+  });
+  return output;
+}
+
+function safeDecodeURIComponent(value) {
+  try {
+    return decodeURIComponent(String(value || '').replace(/\+/g, '%20'));
+  } catch (error) {
+    return String(value || '');
+  }
 }
 
 function parseEpisodes(html, itemId, poster) {
@@ -531,7 +1057,10 @@ function parseCategoryFromDetail(html) {
 }
 
 function parseOverviewFromDetail(html) {
-  const meta = firstMatch(html, /<meta\s+name=["']description["']\s+content=["']([^"']*)["']/i);
+  const meta =
+    metaContent(html, 'name', 'description') ||
+    metaContent(html, 'property', 'og:description') ||
+    firstMatch(html, /<meta\s+name=["']description["']\s+content=["']([^"']*)["']/i);
   if (meta && !/NO视频为用户提供/i.test(meta)) return stripTags(meta).replace(/\s*\[&hellip;\]\s*$/, '');
   const content = firstMatch(html, /<div[^>]+class=["'][^"']*item-content[^"']*["'][^>]*>([\s\S]*?)<\/div>/i);
   return stripTags(content)
@@ -542,14 +1071,21 @@ function parseOverviewFromDetail(html) {
 }
 
 function getDetail(ext) {
-  const itemId = ext.itemId || ext.id || '';
+  const itemId = normalizeItemId(ext.itemId || ext.id || '');
   const html = fetchText(itemId);
   const rawTitle =
+    metaContent(html, 'property', 'og:title') ||
+    metaContent(html, 'name', 'twitter:title') ||
     firstMatch(html, /<meta\s+property=["']og:title["']\s+content=["']([^"']*)["']/i) ||
     stripTags(firstMatch(html, /<h1[^>]+class=["'][^"']*entry-title[^"']*["'][^>]*>([\s\S]*?)<\/h1>/i)) ||
+    stripTags(firstMatch(html, /<h1[^>]*>([\s\S]*?)<\/h1>/i)) ||
+    stripTags(firstMatch(html, /<title[^>]*>([\s\S]*?)<\/title>/i)).replace(/\s*[-_｜|].*NO视频.*$/i, '') ||
     itemId;
   const poster = absolute(
-    firstMatch(html, /<meta\s+property=["']og:image["']\s+content=["']([^"']*)["']/i) || pickImage(html),
+    metaContent(html, 'property', 'og:image') ||
+      metaContent(html, 'name', 'twitter:image') ||
+      firstMatch(html, /<meta\s+property=["']og:image["']\s+content=["']([^"']*)["']/i) ||
+      pickImage(html),
     IMAGE_BASE
   );
   const playInfo = parsePlayInfo(html);
@@ -569,35 +1105,51 @@ function getDetail(ext) {
         }
       ]
     : [];
+  const recommendations = parseCards(
+    firstMatch(html, /<div[^>]+class=["'][^"']*related-single[^"']*["'][^>]*>([\s\S]*?)<div id=["']comments["']/i) || html,
+    '相关推荐'
+  )
+    .filter(function (item) {
+      return item.id !== itemId;
+    })
+    .map(toHeroMediaItem)
+    .slice(0, 18);
 
   return {
     id: itemId,
     title,
+    name: title,
     originalTitle: stripTags(rawTitle),
     type,
     poster,
     backdrop: poster,
+    detailImageAspectRatio: MINI_LIBRARY_HERO_ASPECT_RATIO,
     overview: parseOverviewFromDetail(html),
     year: parseYear(rawTitle),
     genres,
+    providerIds: {
+      novipnoad: itemId,
+      source: WidgetMetadata.id
+    },
     seasons,
     resourceGroups: seasons.length ? [] : playInfo.vid ? buildResourceGroups(itemId, playInfo.vid, '') : [],
+    resourceSummary: {
+      versionCount: seasons.length ? episodes.length : playInfo.vid ? 1 : 0,
+      sourceCount: playInfo.vid || episodes.length ? 1 : 0
+    },
     recommendations: [
       {
-        id: 'related',
+        id: 'novip-related',
         title: '相关推荐',
         style: 'discover.posterCompact',
-        items: parseCards(firstMatch(html, /<div[^>]+class=["'][^"']*related-single[^"']*["'][^>]*>([\s\S]*?)<div id=["']comments["']/i) || html, '相关推荐')
-          .filter(function (item) {
-            return item.id !== itemId;
-          })
-          .slice(0, 18)
+        items: recommendations
       }
     ]
   };
 }
 
 function buildResourceGroups(itemId, vid, episodeTitle) {
+  const directURL = isPlayableURL(vid) ? vid : '';
   return [
     {
       id: 'online',
@@ -606,7 +1158,13 @@ function buildResourceGroups(itemId, vid, episodeTitle) {
         {
           id: vid || 'default',
           name: '在线播放',
+          title: '在线播放',
           subtitle: episodeTitle || '',
+          sourceName: 'NO视频',
+          availability: 'playable',
+          url: directURL || undefined,
+          container: directURL ? inferContainer(directURL, '') : undefined,
+          headers: directURL ? playbackHeaders(PLAYER_BASE + '/') : undefined,
           action: { type: 'play', itemId, episodeId: vid || '', versionId: vid || 'default', title: episodeTitle || '在线播放' },
           default: true
         }
@@ -616,7 +1174,7 @@ function buildResourceGroups(itemId, vid, episodeTitle) {
 }
 
 function getResourceVersions(ext) {
-  const itemId = ext.itemId || ext.id || '';
+  const itemId = normalizeItemId(ext.itemId || ext.id || '');
   const html = fetchText(itemId);
   const playInfo = parsePlayInfo(html);
   const episodes = parseEpisodes(html, itemId, pickImage(html));
@@ -631,15 +1189,25 @@ function getResourceVersions(ext) {
 }
 
 function resolvePlayback(ext) {
-  const itemId = ext.itemId || ext.id || '';
+  const itemId = normalizeItemId(ext.itemId || ext.id || '');
   const detailURL = siteURL(itemId);
   const html = fetchText(itemId);
   const playInfo = parsePlayInfo(html);
   const episodes = parseEpisodes(html, itemId, '');
-  const requested = ext.versionId || ext.episodeId || playInfo.vid || '';
+  const directInput = ext.url || ext.playUrl || ext.play_url || '';
+  if (isPlayableURL(directInput)) {
+    const container = inferContainer(directInput, '');
+    return {
+      url: directInput,
+      container,
+      headers: playbackHeaders(detailURL),
+      preferDirectAVPlayer: shouldUseDirectAVPlayer(directInput, container)
+    };
+  }
+  const requested = playableToken(ext.versionId) || playableToken(ext.episodeId) || playInfo.vid || '';
   const episode =
     episodes.find(function (item) {
-      return item.id === requested;
+      return item.id === requested || item.id === ext.episodeId;
     }) || null;
   const vid = requested || (episode ? episode.id : '') || playInfo.vid;
   const pkey = playInfo.pkey;
@@ -647,19 +1215,49 @@ function resolvePlayback(ext) {
 
   const refPath = itemId || '/';
   const playerURL =
-    PLAYER_BASE + '/v1/?url=' + encodeURIComponent(vid) + '&pkey=' + pkey + '&ref=' + encodeURIComponent(refPath);
+    playInfo.playerURL ||
+    PLAYER_BASE + '/v1/?url=' + encodeURIComponent(vid) + '&pkey=' + encodeURIComponent(pkey) + '&ref=' + encodeURIComponent(refPath);
   const playerFrameURL = PLAYER_BASE + '/v1/player.php?id=' + encodeURIComponent(vid);
+  const playbackReferer = playerURL || playerFrameURL;
   const browserResult = browserFetchPlayer(playerURL, detailURL);
-  const directPlayback = playbackFromBrowserResult(browserResult, playerFrameURL);
-  if (directPlayback) return directPlayback;
+  let lastError = '';
 
   let vkey = extractBrowserVkey(browserResult);
-  if (!vkey || !vkey.ckey) {
-    const playerHTML = fetchPlayer(playerURL, detailURL);
-    vkey = extractVkey(playerHTML);
+  if (vkey) {
+    const directFromBrowserVkey = playbackFromVkeyDirect(vkey, playbackReferer);
+    if (directFromBrowserVkey) return directFromBrowserVkey;
   }
-  if (!vkey || !vkey.ckey) throw new Error('NO视频播放器校验未通过，无法生成播放密钥');
+  if (!vkey || !vkey.ckey) {
+    try {
+      const playerHTML = fetchPlayer(playerURL, detailURL);
+      const playerVkey = extractVkey(playerHTML);
+      if (playerVkey) vkey = playerVkey;
+    } catch (error) {
+      lastError = error && error.message ? error.message : String(error);
+    }
+  }
+  if (vkey) {
+    const directFromVkey = playbackFromVkeyDirect(vkey, playbackReferer);
+    if (directFromVkey) return directFromVkey;
+  }
+  if (vkey && vkey.ckey) {
+    try {
+      return encryptedPlaybackFromVkey(vid, vkey, refPath, playbackReferer);
+    } catch (error) {
+      lastError = error && error.message ? error.message : String(error);
+    }
+  }
 
+  const directPlayback = playbackFromBrowserResult(browserResult, playbackReferer);
+  if (directPlayback) return directPlayback;
+
+  if (!vkey || !vkey.ckey) {
+    throw new Error('NO视频播放器校验未通过，无法生成播放密钥' + (lastError ? '：' + lastError : ''));
+  }
+  throw new Error(lastError || 'NO视频没有返回播放地址');
+}
+
+function encryptedPlaybackFromVkey(vid, vkey, refPath, playerFrameURL) {
   const numericId = String(vid).replace(/^ftn-/, '');
   const encURL =
     ENC_BASE +
@@ -697,6 +1295,24 @@ function resolvePlayback(ext) {
   };
 }
 
+function playbackFromVkeyDirect(vkey, referer) {
+  const url = firstNonEmptyValue(
+    vkey && vkey.url,
+    vkey && vkey.playUrl,
+    vkey && vkey.play_url,
+    vkey && vkey.src,
+    vkey && vkey.m3u8
+  );
+  if (!isPlayableURL(url)) return null;
+  const container = inferContainer(url, vkey.type || vkey.container || '');
+  return {
+    url,
+    container,
+    headers: playbackHeaders(referer),
+    preferDirectAVPlayer: shouldUseDirectAVPlayer(url, container)
+  };
+}
+
 function playbackHeaders(referer) {
   return {
     'User-Agent': UA,
@@ -713,10 +1329,10 @@ function browserFetchPlayer(url, referer) {
     return Widget.browser.fetch(url, {
       visible: false,
       timeout: 60,
-      waitAfterLoad: 1.0,
+      waitAfterLoad: 2.0,
       waitForSessionStorageKey: 'vkey',
       waitForMediaSource: true,
-      waitForAny: false,
+      waitForAny: true,
       headers: {
         'User-Agent': UA,
         Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
@@ -730,7 +1346,9 @@ function browserFetchPlayer(url, referer) {
 
 function extractBrowserVkey(result) {
   if (!result) return null;
-  const storages = [result.sessionStorage, result.localStorage];
+  const storages = [result.sessionStorage, result.localStorage]
+    .concat(Array.isArray(result.frameSessionStorage) ? result.frameSessionStorage : [])
+    .concat(Array.isArray(result.frameLocalStorage) ? result.frameLocalStorage : []);
   for (let index = 0; index < storages.length; index += 1) {
     const storage = storages[index] || {};
     const raw = storage.vkey || storage.VKEY || storage.player_vkey || '';
@@ -738,11 +1356,20 @@ function extractBrowserVkey(result) {
     try {
       return typeof raw === 'string' ? JSON.parse(raw) : raw;
     } catch (error) {
-      return null;
+      continue;
     }
   }
   const html = result.data || result.html || '';
   return extractVkey(html);
+}
+
+function playableToken(value) {
+  const text = String(value || '').trim();
+  if (!text || /^(default|online|play|source|line|线路|播放)$/i.test(text)) return '';
+  if (isPlayableURL(text)) return text;
+  if (/^ftn-[A-Za-z0-9_-]+$/i.test(text)) return text;
+  if (/^[A-Za-z0-9_-]{12,}$/.test(text)) return text;
+  return '';
 }
 
 function playbackFromBrowserResult(result, referer) {
@@ -783,7 +1410,7 @@ function playbackFromBrowserResult(result, referer) {
 
 function isBrowserOnlyPlaybackURL(url) {
   const value = String(url || '');
-  return /media\.oss-internal\.novipnoad\.net\/(?:hls|ts)\//i.test(value);
+  return /media\.oss-internal\.novipnoad\.net\/ts\//i.test(value) || /\.(?:ts|m2ts)(?:$|[?#&])/i.test(value);
 }
 
 function isPlayableURL(url) {
@@ -800,6 +1427,8 @@ function playableURLScore(url) {
 }
 
 function extractVkey(html) {
+  const stored = parseStoredVkey(html);
+  if (stored) return stored;
   const source = extractFunctionSource(html, 'function __');
   if (!source) return null;
   let captured = '';
@@ -863,9 +1492,9 @@ function extractVkey(html) {
     localStorage: fakeStorage,
     eval: function (code) {
       const text = String(code || '');
-      const direct = /sessionStorage\.setItem\(['"]vkey['"]\s*,\s*'([^']+)'/.exec(text);
+      const direct = /sessionStorage\.setItem\(['"]vkey['"]\s*,\s*(["'])([\s\S]*?)\1\)/.exec(text);
       if (direct) {
-        captured = direct[1];
+        captured = unescapeJSString(direct[2]);
         return '';
       }
       if (/Object[\s\S]*prototype[\s\S]*toString[\s\S]*sessionStorage|indexedDB/i.test(text)) {
@@ -893,6 +1522,36 @@ function extractVkey(html) {
   } catch (error) {
     return null;
   }
+}
+
+function parseStoredVkey(html) {
+  const source = String(html || '');
+  const patterns = [
+    /sessionStorage\.setItem\(['"]vkey['"]\s*,\s*(["'])([\s\S]*?)\1\)/i,
+    /localStorage\.setItem\(['"]vkey['"]\s*,\s*(["'])([\s\S]*?)\1\)/i,
+    /["']vkey["']\s*:\s*(["'])([\s\S]*?)\1/i
+  ];
+  for (let index = 0; index < patterns.length; index += 1) {
+    const match = patterns[index].exec(source);
+    if (!match) continue;
+    try {
+      return JSON.parse(unescapeJSString(match[2]));
+    } catch (error) {}
+  }
+  return null;
+}
+
+function unescapeJSString(value) {
+  return String(value || '')
+    .replace(/\\x([0-9a-f]{2})/gi, function (_, hex) {
+      return String.fromCharCode(parseInt(hex, 16));
+    })
+    .replace(/\\u([0-9a-f]{4})/gi, function (_, hex) {
+      return String.fromCharCode(parseInt(hex, 16));
+    })
+    .replace(/\\"/g, '"')
+    .replace(/\\'/g, "'")
+    .replace(/\\\\/g, '\\');
 }
 
 function extractFunctionSource(html, marker) {
@@ -1025,10 +1684,13 @@ function search(ext) {
   const page = Number(ext.page || 1);
   const path = '/?s=' + encodeURIComponent(query) + (page > 1 ? '&paged=' + page : '');
   const html = fetchText(path);
-  const items = parseCards(html, '搜索结果');
+  const items = parseCards(html, '搜索结果').map(toPosterMediaItem);
   return {
     pageType: 'search',
-    title: '搜索结果',
+    title: query ? '搜索：' + query : '搜索结果',
+    style: 'media.posterGrid',
+    itemAspectRatio: MINI_LIBRARY_ITEM_ASPECT_RATIO,
+    imageOrientation: 'portrait',
     items,
     page,
     hasMore: hasNextPage(html, page)
@@ -1037,6 +1699,10 @@ function search(ext) {
 
 function onSearch(ext) {
   return search(ext);
+}
+
+function getSearch(ext) {
+  return search(ext || {});
 }
 
 function matchResources(ext) {
@@ -1074,4 +1740,77 @@ function matchMovie(ext) {
 
 function matchEpisode(ext) {
   return matchResources(ext);
+}
+
+function getCategories() {
+  return CATEGORY_SHORTCUTS.map(function (category) {
+    return {
+      id: category.id,
+      title: category.title,
+      name: category.title,
+      group: category.group || '分类',
+      type: 'folder',
+      kind: category.kind || 'category',
+      sourceId: WidgetMetadata.id
+    };
+  });
+}
+
+function getItems(ext) {
+  const page = getCategory(ext || {});
+  return page.items || [];
+}
+
+function category(ext) {
+  return getCategory(ext || {});
+}
+
+function detail(ext) {
+  return getDetail(ext || {});
+}
+
+function resources(ext) {
+  return getResourceVersions(ext || {});
+}
+
+function getVersions(ext) {
+  return getResourceVersions(ext || {});
+}
+
+function resolve(ext) {
+  return resolvePlayback(ext || {});
+}
+
+function play(ext) {
+  return resolvePlayback(ext || {});
+}
+
+if (typeof globalThis !== 'undefined') {
+  globalThis.WidgetMetadata = WidgetMetadata;
+  globalThis.getManifest = getManifest;
+  globalThis.getHome = getHome;
+  globalThis.getHomeSection = getHomeSection;
+  globalThis.getCategory = getCategory;
+  globalThis.getCategories = getCategories;
+  globalThis.getItems = getItems;
+  globalThis.getDetail = getDetail;
+  globalThis.getResourceVersions = getResourceVersions;
+  globalThis.getVersions = getVersions;
+  globalThis.resources = resources;
+  globalThis.resolvePlayback = resolvePlayback;
+  globalThis.resolve = resolve;
+  globalThis.play = play;
+  globalThis.search = search;
+  globalThis.getSearch = getSearch;
+  globalThis.onSearch = onSearch;
+  globalThis.matchResources = matchResources;
+  globalThis.matchMovie = matchMovie;
+  globalThis.matchEpisode = matchEpisode;
+  globalThis.home = home;
+  globalThis.homeSection = homeSection;
+  globalThis.getSection = getSection;
+  globalThis.section = section;
+  globalThis.loadSection = loadSection;
+  globalThis.category = category;
+  globalThis.detail = detail;
 }
