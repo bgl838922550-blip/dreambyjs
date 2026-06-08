@@ -48,14 +48,31 @@ const JUOK_SITE_NAMES = {
   wasu: '华数'
 };
 
+const JUOK_SITE_PRIORITY = [
+  'qiyi',
+  'youku',
+  'qq',
+  'imgo',
+  'mgtv',
+  'bilibili1',
+  'bilibili',
+  'leshi',
+  'le',
+  'sohu',
+  'pptv',
+  '1905',
+  'cntv',
+  'wasu',
+  'douyin'
+];
+
 const JUOK_HOME_SECTIONS = [
   {
     id: 'juok-tv-hot',
     title: '电视剧热播',
     catId: 2,
     sort: 'rankhot',
-    style: 'discover.ranked',
-    promotesToHero: true
+    style: 'discover.ranked'
   },
   {
     id: 'juok-movie-latest',
@@ -136,7 +153,7 @@ function getManifest() {
 }
 
 function getHome() {
-  const hero = safeFetchHero();
+  const hero = safeFetchHomeSlides();
   return {
     pageType: 'home',
     id: 'juok-home',
@@ -314,21 +331,27 @@ function resolvePlayback(ext) {
       );
   const resolved = postJSON(JUOK_BASE + '/api/player/resolve', body, {
     referer: playPage,
-    headers: { 'X-Player-Request': '1' }
+    headers: { Origin: JUOK_BASE, 'X-Player-Request': '1' }
   });
 
   if (resolved && resolved.success && resolved.mode === 'direct' && resolved.encrypted) {
     const decrypted = postJSON(
       JUOK_BASE + '/api/player/decrypt',
       { encrypted: resolved.encrypted, nonce: token && token.nonce },
-      { referer: playPage, headers: { 'X-Player-Request': '1' } }
+      { referer: playPage, headers: { Origin: JUOK_BASE, 'X-Player-Request': '1' } }
     );
     if (decrypted && decrypted.url) {
+      if (isPlayerErrorURL(decrypted.url)) {
+        throw new Error('剧OK播放地址解析到了站点占位视频，请切换其他线路。');
+      }
       return playback(resolvePlayerURL(decrypted.url, resolved.useProxy));
     }
   }
 
   if (resolved && resolved.success && resolved.url) {
+    if (isPlayerErrorURL(resolved.url)) {
+      throw new Error('剧OK播放地址解析到了站点占位视频，请切换其他线路。');
+    }
     return playback(resolvePlayerURL(resolved.url, resolved.useProxy));
   }
 
@@ -343,7 +366,11 @@ function search(ext) {
   }
 
   const primary = fetchSearch(query, '360kan', page);
-  let items = (primary.results || []).map(mapSearch360Item).filter(Boolean);
+  let items = (primary.results || [])
+    .map(function (item) {
+      return item && (item.isExternal || item.vod_id) ? mapExternalSearchItem(item) : mapSearch360Item(item);
+    })
+    .filter(Boolean);
   const seen = {};
   items = items.filter(function (item) {
     const key = searchDedupeKey(item);
@@ -423,6 +450,90 @@ function safeFetchHero() {
   } catch (error) {
     return [];
   }
+}
+
+function safeFetchHomeSlides() {
+  try {
+    const slides = fetchHomeSlides();
+    if (slides.length) return slides;
+  } catch (error) {
+    // 首页 slides 是 SSR 数据，取不到时再退回热播，避免整个媒体库空白。
+  }
+  return safeFetchHero();
+}
+
+function fetchHomeSlides() {
+  const html = requestText(JUOK_BASE + '/', { referer: JUOK_BASE + '/' });
+  return parseHomeSlides(html).slice(0, 8);
+}
+
+function parseHomeSlides(html) {
+  const text = String(html || '');
+  const patterns = [
+    /\\"slides\\":(\[[\s\S]*?\]),\\"autoPlay\\"/,
+    /"slides":(\[[\s\S]*?\]),"autoPlay"/
+  ];
+
+  for (let index = 0; index < patterns.length; index += 1) {
+    const match = patterns[index].exec(text);
+    if (!match) continue;
+    try {
+      const jsonText = index === 0 ? decodeNextFlightJSON(match[1]) : match[1];
+      const slides = JSON.parse(jsonText);
+      return normalizeHomeSlides(slides);
+    } catch (error) {
+      // 继续尝试下一种格式。
+    }
+  }
+
+  return [];
+}
+
+function decodeNextFlightJSON(value) {
+  return String(value || '')
+    .replace(/\\\\u([0-9a-fA-F]{4})/g, '\\u$1')
+    .replace(/\\\\\//g, '/')
+    .replace(/\\"/g, '"');
+}
+
+function normalizeHomeSlides(slides) {
+  if (!Array.isArray(slides)) return [];
+  return slides.map(function (slide, index) {
+    return mapHomeSlideItem(slide, index + 1);
+  }).filter(Boolean);
+}
+
+function mapHomeSlideItem(slide, rank) {
+  if (!slide || typeof slide !== 'object') return null;
+  const parsed = parseDetailId(slide.url || '');
+  const catId = numberValue(firstNonEmpty(slide.cat, parsed.cat), 2);
+  const category = categoryByCatId(catId) || JUOK_CATEGORIES[1];
+  const id = firstNonEmpty(slide.id, parsed.id);
+  if (!id) return null;
+  const itemId = '/detail/' + catId + '/' + id;
+  const title = stripTags(firstNonEmpty(slide.title, id));
+  const image = imageURL(firstNonEmpty(slide.cover, slide.poster, slide.backdrop));
+  return {
+    id: itemId,
+    title,
+    subtitle: category.title,
+    type: category.type,
+    poster: image,
+    backdrop: image,
+    overview: stripTags(slide.description || ''),
+    rank,
+    remarks: '首页轮播',
+    metadataText: category.title,
+    badges: ['首页轮播', category.title],
+    aspectRatio: '16:9',
+    action: {
+      type: 'detail',
+      itemId,
+      title,
+      itemAspectRatio: '16:9'
+    },
+    providerIds: { juok3: id }
+  };
 }
 
 function fetchDetail(cat, id, site) {
@@ -513,7 +624,6 @@ function defaultHeaders(referer) {
   return {
     'User-Agent': JUOK_UA,
     Accept: 'application/json,text/plain,*/*',
-    Origin: JUOK_BASE,
     Referer: referer || JUOK_BASE + '/'
   };
 }
@@ -621,9 +731,9 @@ function mapDetail(detail, params) {
   return result;
 }
 
-function buildSeason(detail) {
-  const site = firstSite(detail);
-  const episodes = (detail.allepidetail && detail.allepidetail[site]) || detail.defaultepisode || [];
+function buildSeason(detail, params) {
+  const episodeData = bestEpisodeData(detail, params);
+  const episodes = episodeData.episodes || [];
   const total = numberValue(firstNonEmpty(detail.total, detail.upinfo, episodes.length), episodes.length);
   return {
     id: 'season-1',
@@ -640,7 +750,7 @@ function buildSeason(detail) {
         poster: imageURL(firstNonEmpty(episode.cdn_v_cover, episode.v_cover, episode.cover, detail.cdncover, detail.cover)),
         action: {
           type: 'play',
-          itemId: '/detail/' + categoryIdFromDetail(detail) + '/' + (detail.ent_id || detail.id),
+          itemId: '/detail/' + params.cat + '/' + params.id,
           episodeId: String(firstNonEmpty(episode.playlink_num, number)),
           title: episodeTitle(episode, number, detail)
         }
@@ -648,6 +758,37 @@ function buildSeason(detail) {
     }),
     overview: total ? '共 ' + total + ' 集' : undefined
   };
+}
+
+function bestEpisodeData(detail, params) {
+  const sites = sortSites(normalizeStringArray(detail.playlink_sites));
+  let bestSite = firstSite(detail);
+  let bestEpisodes =
+    (detail.allepidetail && detail.allepidetail[bestSite]) ||
+    detail.defaultepisode ||
+    [];
+  const expectedTotal = numberValue(firstNonEmpty(detail.total, detail.upinfo), 0);
+
+  sites.forEach(function (site) {
+    let siteDetail = detail;
+    if (!siteDetail.allepidetail || !siteDetail.allepidetail[site]) {
+      try {
+        siteDetail = fetchDetail(params.cat, params.id, site);
+      } catch (error) {
+        siteDetail = detail;
+      }
+    }
+    const episodes = (siteDetail.allepidetail && siteDetail.allepidetail[site]) || [];
+    if (episodes.length > bestEpisodes.length) {
+      bestSite = site;
+      bestEpisodes = episodes;
+    }
+  });
+
+  if (expectedTotal > 0 && bestEpisodes.length >= expectedTotal) {
+    return { site: bestSite, episodes: bestEpisodes };
+  }
+  return { site: bestSite, episodes: bestEpisodes };
 }
 
 function buildRecommendations(catId, currentId) {
@@ -672,7 +813,7 @@ function buildRecommendations(catId, currentId) {
 
 function buildMovieResourceGroups(detail, params) {
   const versions = [];
-  const sites = normalizeStringArray(detail.playlink_sites);
+  const sites = sortSites(normalizeStringArray(detail.playlink_sites));
   const details = detail.playlinksdetail || {};
   const links = detail.playlinks || {};
   sites.forEach(function (site, index) {
@@ -700,7 +841,7 @@ function buildMovieResourceGroups(detail, params) {
 
 function buildEpisodeResourceGroups(detail, params, episodeId) {
   const versions = [];
-  const sites = normalizeStringArray(detail.playlink_sites);
+  const sites = sortSites(normalizeStringArray(detail.playlink_sites));
   sites.forEach(function (site, index) {
     let siteDetail = detail;
     if (!siteDetail.allepidetail || !siteDetail.allepidetail[site]) {
@@ -972,8 +1113,10 @@ function categoryIdFromDetail(detail) {
 }
 
 function firstSite(detail) {
+  const episodeSites = Object.keys((detail && detail.allepidetail) || {});
+  if (episodeSites.length) return episodeSites[0];
   const sites = normalizeStringArray(detail.playlink_sites);
-  return sites[0] || Object.keys(detail.playlinks || {})[0] || Object.keys(detail.allepidetail || {})[0] || '';
+  return sortSites(sites)[0] || Object.keys(detail.playlinks || {})[0] || '';
 }
 
 function episodeTitle(episode, number, detail) {
@@ -1020,6 +1163,10 @@ function isDirectMediaURL(url) {
   return /\.(m3u8|mp4|mkv|mov|flv)(\?|#|$)/i.test(String(url || ''));
 }
 
+function isPlayerErrorURL(url) {
+  return /(^|\/)error\.(mp4|m3u8)(\?|#|$)/i.test(String(url || ''));
+}
+
 function mediaContainer(url) {
   const match = /\.([a-z0-9]+)(?:\?|#|$)/i.exec(String(url || ''));
   return match ? match[1].toLowerCase() : undefined;
@@ -1048,6 +1195,19 @@ function resolvePlayerURL(url, useProxy) {
 
 function siteName(site) {
   return JUOK_SITE_NAMES[site] || site || '播放';
+}
+
+function sortSites(sites) {
+  const priority = {};
+  JUOK_SITE_PRIORITY.forEach(function (site, index) {
+    priority[site] = index;
+  });
+  return (sites || []).slice().sort(function (a, b) {
+    const left = priority[a] == null ? 999 : priority[a];
+    const right = priority[b] == null ? 999 : priority[b];
+    if (left !== right) return left - right;
+    return String(a).localeCompare(String(b));
+  });
 }
 
 function stripTags(value) {
