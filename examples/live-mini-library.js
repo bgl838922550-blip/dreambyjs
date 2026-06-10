@@ -16,13 +16,20 @@ const DEFAULT_BG_COLOR = 'DCDCDC';
 const FALLBACK_WIDE_IMAGE = 'https://i.miji.bid/2025/05/17/c4a0703b68a4d2313a27937d82b72b6a.png';
 const FALLBACK_POSTER_IMAGE = 'https://i.miji.bid/2025/05/17/343e3416757775e312197588340fc0d3.png';
 const CACHE_TTL_MS = 6 * 60 * 60 * 1000;
+const STATUS_CACHE_TTL_MS = 30 * 60 * 1000;
 const PLAY_PROBE_TIMEOUT = 3;
-const PLAY_PROBE_LIMIT = 4;
-const SOURCE_PREVIEW_GROUP_LIMIT = 14;
+const PLAY_PROBE_LIMIT = 8;
+const MAX_CHANNEL_ALTERNATES = 16;
 const SOURCE_PREVIEW_CHANNEL_LIMIT = 5;
 const HUYA_YQK_URL = 'http://add.aptvapp.com/https://cdn.jsdelivr.net/gh/Kimentanm/aptv@master/m3u/yqk.m3u';
 
 const BUILT_IN_SOURCES = [
+  {
+    id: 'jsnzkpg-live',
+    title: 'Jsnzkpg 直播',
+    subtitle: '综合直播源',
+    url: 'https://raw.githubusercontent.com/Jsnzkpg/Jsnzkpg/Jsnzkpg/Jsnzkpg1.m3u',
+  },
   {
     id: 'kimentanm-aptv',
     title: 'Kimentanm APTV',
@@ -164,6 +171,18 @@ function getManifest() {
           { title: '竖向', value: 'V' },
         ],
       },
+      {
+        name: 'status_probe_limit',
+        title: '后台探测数量',
+        type: 'input',
+        value: '80',
+        description: '进入频道列表后后台探测多少个频道的可播放状态。页面会先显示，探测结果随后更新。',
+        placeholders: [
+          { title: '关闭', value: '0' },
+          { title: '默认', value: '80' },
+          { title: '较多', value: '200' },
+        ],
+      },
     ],
   };
 }
@@ -195,7 +214,7 @@ async function getHomeSection(ctx = {}) {
       lazy: false,
       isLazy: false,
       subtitle: `${channels.length} 个频道 · ${groups.length} 个分组`,
-      items: groups.slice(0, SOURCE_PREVIEW_GROUP_LIMIT).map((group, index) => groupEntry(source, group, index)),
+      items: groups.map((group, index) => groupEntry(source, group, index)),
     };
   } catch (error) {
     return {
@@ -218,6 +237,22 @@ async function getCategory(ctx = {}) {
   const source = sourceFromPageId(pageId, config);
   const groupTitle = groupTitleFromPageId(pageId);
   const channels = await loadChannels(config, source);
+  if (isSourceGroupsPageId(pageId)) {
+    const groups = buildGroups(channels);
+    const start = (page - 1) * pageSize;
+    const pageGroups = groups.slice(start, start + pageSize);
+    return {
+      pageType: 'category',
+      id: pageId,
+      title: `${source.title} · 分组`,
+      style: 'discover.annualWidePreview',
+      itemAspectRatio: '16:9',
+      items: pageGroups.map((group, index) => groupEntry(source, group, start + index)),
+      page,
+      hasMore: start + pageSize < groups.length,
+    };
+  }
+
   const selectedChannels = groupTitle
     ? channels.filter((channel) => channel.group === groupTitle)
     : channels;
@@ -259,11 +294,21 @@ async function search(ctx = {}) {
 async function resolvePlayback(ctx = {}) {
   const payload = decodeChannelPayload(ctx.itemId || ctx.id || ctx.url || '');
   const candidates = playbackCandidates(payload, ctx.url);
+  const probeOnly = !!(ctx.probeOnly || ctx.statusProbe);
   if (!candidates.length) {
     throw new Error('没有可播放的直播地址');
   }
-  const selected = selectPreferredCandidate(candidates);
-  const playable = selected && selected.huyaResolved ? selected : resolvePlayableCandidate(selected);
+  let playable;
+  try {
+    const selected = selectPreferredCandidate(candidates, probeOnly);
+    playable = selected && (selected.huyaResolved || probeOnly) ? selected : resolvePlayableCandidate(selected);
+    markPlaybackCandidateStatus(playable, 'ok');
+  } catch (error) {
+    if (!probeOnly) {
+      candidates.forEach((candidate) => markPlaybackCandidateStatus(candidate, 'failed'));
+    }
+    throw error;
+  }
 
   return {
     url: playable.url,
@@ -445,16 +490,21 @@ function channelItem(channel) {
   const itemId = encodeChannelPayload(channel);
   const lineCount = Array.isArray(channel.alternates) ? channel.alternates.length : 1;
   const playTitle = playbackTitle(channel.title);
+  const status = channel.playStatus || cachedChannelPlayStatus(channel).status;
+  const statusSuffix = playbackStatusSuffix(status);
+  const displayTitle = channel.total
+    ? `${channel.title} (${channel.index}/${channel.total})${statusSuffix}`
+    : `${channel.title}${statusSuffix}`;
   return {
     id: itemId,
-    title: channel.total ? `${channel.title} (${channel.index}/${channel.total})` : channel.title,
+    title: displayTitle,
     subtitle: channel.group,
     type: 'live',
     poster: channel.poster || FALLBACK_POSTER_IMAGE,
     backdrop: channel.backdrop || channel.poster || FALLBACK_WIDE_IMAGE,
     metadataText: channel.group,
     overview: channel.url,
-    badges: lineCount > 1 ? ['直播', `${lineCount} 线`] : ['直播'],
+    badges: playbackStatusBadges(status, lineCount),
     aspectRatio: '16:9',
     imageFit: 'fit',
     action: {
@@ -530,13 +580,13 @@ function sourceSection(source) {
     isLazy: true,
     moreAction: {
       type: 'category',
-      pageId: sourcePageId(source),
-      title: `${source.title} · 全部频道`,
+      pageId: sourceGroupsPageId(source),
+      title: `${source.title} · 分组`,
       itemAspectRatio: '16:9',
     },
     loadAction: {
       type: 'category',
-      pageId: sourcePageId(source),
+      pageId: sourceGroupsPageId(source),
       title: source.title,
       itemAspectRatio: '16:9',
     },
@@ -585,6 +635,15 @@ function sourcePageId(source, groupTitle) {
   return groupTitle ? `${base}:group:${encodeKey(groupTitle)}` : `${base}:all`;
 }
 
+function sourceGroupsPageId(source) {
+  return `src:${encodeKey(source.id)}:groups`;
+}
+
+function isSourceGroupsPageId(pageId) {
+  const text = String(pageId || '').trim();
+  return text.startsWith('src:') && text.split(':').includes('groups');
+}
+
 function groupTitleFromPageId(pageId) {
   const text = String(pageId || '').trim();
   if (text.startsWith('src:')) {
@@ -606,6 +665,62 @@ function buildGroups(channels) {
     map[key].push(channel);
   }
   return Object.keys(map).map((title) => ({ title, channels: map[title] }));
+}
+
+function cachedChannelPlayStatus(channel) {
+  const candidates = playbackCandidates(channel || {}, channel && channel.url);
+  if (!candidates.length) return { status: '' };
+
+  let sawKnown = false;
+  let sawUnknown = false;
+  for (const candidate of candidates) {
+    const cached = cachedPlaybackCandidateStatus(candidate);
+    if (cached.status === 'ok') return cached;
+    if (cached.status === 'failed') sawKnown = true;
+    if (!cached.status) sawUnknown = true;
+  }
+  if (sawKnown && !sawUnknown) return { status: 'failed' };
+  return { status: '' };
+}
+
+function cachedPlaybackCandidateStatus(candidate) {
+  const key = playbackStatusCacheKey(candidate);
+  if (!key) return { status: '' };
+  const cached = Widget.storage.get(key);
+  if (!cached || !cached.status || !cached.time) return { status: '' };
+  if (Date.now() - Number(cached.time || 0) > STATUS_CACHE_TTL_MS) return { status: '' };
+  return cached;
+}
+
+function markPlaybackCandidateStatus(candidate, status, reason) {
+  const key = playbackStatusCacheKey(candidate);
+  if (!key || !status) return;
+  Widget.storage.set(key, {
+    status,
+    reason: reason || '',
+    time: Date.now(),
+    url: String(candidate && candidate.url || ''),
+  });
+}
+
+function playbackStatusCacheKey(candidate) {
+  const url = String(candidate && candidate.url || '').trim();
+  if (!url) return '';
+  return `live-status:${encodeKey(url)}`;
+}
+
+function playbackStatusSuffix(status) {
+  if (status === 'ok') return ' ✅';
+  if (status === 'failed') return ' ❌';
+  return '';
+}
+
+function playbackStatusBadges(status, lineCount) {
+  const badges = ['直播'];
+  if (status === 'ok') badges.push('可播');
+  if (status === 'failed') badges.push('失效');
+  if (lineCount > 1) badges.push(`${lineCount} 线`);
+  return badges;
 }
 
 function mergeChannelAlternates(channels) {
@@ -631,8 +746,27 @@ function mergeChannelAlternates(channels) {
     }
   }
 
+  const relatedMap = {};
+  for (const channel of merged) {
+    const relatedKey = normalizeChannelName(channel.tvgId || channel.title);
+    if (!relatedKey) continue;
+    if (!relatedMap[relatedKey]) relatedMap[relatedKey] = [];
+    channel.alternates.forEach((alternate) => {
+      if (!relatedMap[relatedKey].some((item) => item.url === alternate.url)) {
+        relatedMap[relatedKey].push(alternate);
+      }
+    });
+  }
+
   return merged.map((channel) => {
-    const alternates = sortCandidates(channel.alternates);
+    const relatedKey = normalizeChannelName(channel.tvgId || channel.title);
+    const expandedAlternates = [...(channel.alternates || [])];
+    (relatedMap[relatedKey] || []).forEach((alternate) => {
+      if (!expandedAlternates.some((item) => item.url === alternate.url)) {
+        expandedAlternates.push(alternate);
+      }
+    });
+    const alternates = sortCandidates(expandedAlternates).slice(0, MAX_CHANNEL_ALTERNATES);
     const first = alternates[0] || streamCandidate(channel);
     return {
       ...channel,
@@ -653,6 +787,7 @@ function readConfig(ctx) {
     name_filter: String(source.name_filter || '').trim(),
     bg_color: sanitizeColor(source.bg_color || DEFAULT_BG_COLOR),
     direction: String(source.direction || 'H').trim().toUpperCase() === 'V' ? 'V' : 'H',
+    status_probe_limit: boundedInteger(source.status_probe_limit, 80, 0, 300),
   };
 }
 
@@ -767,19 +902,20 @@ function playbackCandidates(payload, directURL) {
   return sortCandidates(candidates);
 }
 
-function selectPreferredCandidate(candidates) {
+function selectPreferredCandidate(candidates, probeOnly = false) {
   const sorted = sortCandidates(candidates);
-  const probeTargets = sorted.slice(0, PLAY_PROBE_LIMIT);
+  const probeTargets = probeOnly ? sorted.slice(0, PLAY_PROBE_LIMIT) : sorted;
   let firstFailure = '';
 
   for (const candidate of probeTargets) {
     const result = probeCandidate(candidate);
-    if (result.ok) return result.playable || candidate;
+    if (result.ok) {
+      markPlaybackCandidateStatus(candidate, 'ok');
+      markPlaybackCandidateStatus(result.playable || candidate, 'ok');
+      return result.playable || candidate;
+    }
+    markPlaybackCandidateStatus(candidate, 'failed', result.reason);
     if (!firstFailure && result.reason) firstFailure = result.reason;
-  }
-
-  if (sorted.length > probeTargets.length) {
-    return sorted[probeTargets.length];
   }
 
   throw new Error(firstFailure || '直播地址不可用');
@@ -807,28 +943,40 @@ function resolvePlayableCandidate(candidate, probeOnly = false) {
   if (huyaPlayable) return huyaPlayable;
 
   const url = String(candidate.url || '').trim();
-  if (!url || !/^https?:\/\//i.test(url) || containerFromURL(url) !== 'm3u8') {
+  if (!url || !/^https?:\/\//i.test(url)) {
     return candidate;
   }
 
-  const playlistResponse = fetchTextResponse(url, playbackHeaders(candidate), PLAY_PROBE_TIMEOUT);
-  const playlist = playlistResponse.text;
+  const response = fetchProbeResponse(url, playbackHeaders(candidate), PLAY_PROBE_TIMEOUT);
+  assertPlayableHTTPResponse(response, url);
+  const detectedContainer = containerFromPlaybackResponse(response, url);
+  if (detectedContainer !== 'm3u8') {
+    return {
+      ...candidate,
+      url: response.finalURL || url,
+      container: detectedContainer || containerFromURL(response.finalURL || url),
+    };
+  }
+
+  const playlist = response.text;
   if (!playlist.includes('#EXTM3U')) {
-    return candidate;
+    throw new Error('直播地址返回的不是有效 HLS 列表');
   }
 
-  const playlistURL = playlistResponse.finalURL || url;
+  const playlistURL = response.finalURL || url;
   const variant = selectHLSVariant(playlist, playlistURL);
   const resolved = variant
     ? { ...candidate, url: variant.url, referer: candidate.referer || playlistURL }
     : { ...candidate, url: playlistURL || url };
 
   const mediaResponse = variant
-    ? fetchTextResponse(resolved.url, playbackHeaders(resolved), PLAY_PROBE_TIMEOUT)
-    : playlistResponse;
+    ? fetchProbeResponse(resolved.url, playbackHeaders(resolved), PLAY_PROBE_TIMEOUT)
+    : response;
+  assertPlayableHTTPResponse(mediaResponse, resolved.url);
   const playable = {
     ...resolved,
     url: mediaResponse.finalURL || resolved.url,
+    container: 'm3u8',
   };
   probeFirstHLSSegment(mediaResponse.text, playable);
 
@@ -1015,6 +1163,35 @@ function fetchText(url, headers, timeout) {
   return fetchTextResponse(url, headers, timeout).text;
 }
 
+function fetchProbeResponse(url, headers, timeout) {
+  const probe = Widget.http && typeof Widget.http.probe === 'function'
+    ? Widget.http.probe
+    : null;
+  if (!probe) return fetchTextResponse(url, headers, timeout);
+
+  const response = probe(url, {
+    timeout,
+    maxBytes: 4096,
+    headers: {
+      ...headers,
+      Accept: '*/*',
+    },
+  });
+  const status = Number(response && response.status ? response.status : 0);
+  if (status && (status < 200 || status >= 400)) {
+    throw new Error(`直播地址返回 HTTP ${status}`);
+  }
+  return {
+    text: responseDataText(response && response.data),
+    finalURL: String(
+      (response && (response.finalURL || response.urlEffective || response.responseURL || response.url))
+      || url
+    ).trim(),
+    status,
+    headers: response && (response.headers || response.respHeaders || {}),
+  };
+}
+
 function fetchTextResponse(url, headers, timeout) {
   const response = Widget.http.get(url, {
     timeout,
@@ -1028,7 +1205,7 @@ function fetchTextResponse(url, headers, timeout) {
     throw new Error(`直播地址返回 HTTP ${status}`);
   }
   return {
-    text: typeof response.data === 'string' ? response.data : String(response.data || ''),
+    text: responseDataText(response && response.data),
     finalURL: String(
       (response && (response.finalURL || response.urlEffective || response.responseURL || response.url))
       || url
@@ -1036,6 +1213,78 @@ function fetchTextResponse(url, headers, timeout) {
     status,
     headers: response && (response.headers || response.respHeaders || {}),
   };
+}
+
+function responseDataText(data) {
+  if (typeof data === 'string') return data;
+  if (data == null) return '';
+  if (typeof data === 'object') {
+    try {
+      return JSON.stringify(data);
+    } catch (_) {
+      return String(data || '');
+    }
+  }
+  return String(data || '');
+}
+
+function headerValue(headers, name) {
+  const target = String(name || '').toLowerCase();
+  const entries = Object.entries(headers || {});
+  for (const [key, value] of entries) {
+    if (String(key || '').toLowerCase() === target) return String(value || '');
+  }
+  return '';
+}
+
+function assertPlayableHTTPResponse(response, url) {
+  const text = String(response && response.text || '').trim();
+  const contentType = headerValue(response && response.headers, 'content-type').toLowerCase();
+  const finalURL = String((response && response.finalURL) || url || '').toLowerCase();
+  if (contentType.includes('application/json') || text.startsWith('{') || text.startsWith('[')) {
+    throw new Error(`直播地址返回 JSON，不是媒体流：${playbackErrorPreview(text)}`);
+  }
+  if (
+    contentType.includes('text/html')
+    || /^<!doctype\s+html/i.test(text)
+    || /^<html[\s>]/i.test(text)
+    || finalURL.includes('/404')
+  ) {
+    throw new Error(`直播地址返回网页，不是媒体流：${playbackErrorPreview(text)}`);
+  }
+}
+
+function playbackErrorPreview(value) {
+  return String(value || '').replace(/\s+/g, ' ').slice(0, 80);
+}
+
+function containerFromPlaybackResponse(response, fallbackURL) {
+  const text = String(response && response.text || '');
+  const finalURL = String((response && response.finalURL) || fallbackURL || '');
+  const contentType = headerValue(response && response.headers, 'content-type').toLowerCase();
+  const urlContainer = containerFromURL(finalURL || fallbackURL);
+  const trimmed = text.trimStart();
+
+  if (
+    contentType.includes('mpegurl')
+    || contentType.includes('vnd.apple')
+    || contentType.includes('m3u')
+    || trimmed.startsWith('#EXTM3U')
+    || urlContainer === 'm3u8'
+  ) {
+    return 'm3u8';
+  }
+  if (contentType.includes('x-flv') || contentType.includes('flv') || trimmed.startsWith('FLV') || urlContainer === 'flv') {
+    return 'flv';
+  }
+  if (contentType.includes('mp2t') || contentType.includes('mpegts') || urlContainer === 'ts') {
+    return 'ts';
+  }
+  if (contentType.includes('mp4') || contentType.includes('quicktime') || urlContainer === 'mp4') {
+    return 'mp4';
+  }
+  if (urlContainer && urlContainer !== 'm3u8') return urlContainer;
+  return 'm3u8';
 }
 
 function selectHLSVariant(playlist, baseURL) {
@@ -1262,6 +1511,12 @@ function sanitizeColor(value) {
   return color.length === 6 ? color : DEFAULT_BG_COLOR;
 }
 
+function boundedInteger(value, fallback, min, max) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return fallback;
+  return Math.min(max, Math.max(min, Math.floor(number)));
+}
+
 function absolutizeURL(value, baseURL) {
   const url = String(value || '').trim();
   if (!url || /^[a-z][a-z0-9+.-]*:/i.test(url)) return url;
@@ -1290,11 +1545,11 @@ function containerFromURL(url) {
   const filename = pathname.slice(pathname.lastIndexOf('/') + 1);
   const ext = filename.includes('.') ? filename.slice(filename.lastIndexOf('.') + 1) : '';
   if (ext === 'm3u' || ext === 'm3u8') return 'm3u8';
-  if (['php', 'asp', 'aspx', 'jsp'].includes(ext)) return 'm3u8';
   if (ext === 'flv') return 'flv';
   if (ext === 'ts') return 'ts';
   if (ext === 'mp4') return 'mp4';
-  return ext || 'm3u8';
+  if (['php', 'asp', 'aspx', 'jsp'].includes(ext)) return '';
+  return ext || '';
 }
 
 function encodeChannelPayload(channel) {
