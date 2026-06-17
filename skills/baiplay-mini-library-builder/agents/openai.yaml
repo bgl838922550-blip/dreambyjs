@@ -1,0 +1,4 @@
+interface:
+  display_name: "baiPlay Mini Library Builder"
+  short_description: "Build baiPlay custom media library scripts"
+  default_prompt: "Use $baiplay-mini-library-builder to create a baiPlay custom media library for this site or API."
