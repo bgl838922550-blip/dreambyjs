@@ -520,6 +520,7 @@ function mapHomeSlideItem(slide, rank) {
     type: category.type,
     poster: image,
     backdrop: image,
+    imageHeaders: imageHeaders(),
     overview: stripTags(slide.description || ''),
     rank,
     remarks: '首页轮播',
@@ -628,6 +629,13 @@ function defaultHeaders(referer) {
   };
 }
 
+function imageHeaders(referer) {
+  return {
+    'User-Agent': JUOK_UA,
+    Referer: referer || JUOK_BASE + '/'
+  };
+}
+
 function mapVideoItem(video, catId, rank) {
   const category = categoryByCatId(catId) || JUOK_CATEGORIES[0];
   const id = firstNonEmpty(video.ent_id, video.id);
@@ -644,6 +652,7 @@ function mapVideoItem(video, catId, rank) {
     type: category.type,
     poster,
     backdrop,
+    imageHeaders: imageHeaders(),
     overview: firstNonEmpty(video.description, video.comment, video.lasttitle),
     year,
     rating: scoreValue(firstNonEmpty(video.doubanscore, video.score)),
@@ -670,6 +679,7 @@ function categoryEntry(category, previewItems) {
     type: 'collection',
     poster: previewItems[0] && (previewItems[0].backdrop || previewItems[0].poster),
     backdrop: previewItems[0] && (previewItems[0].backdrop || previewItems[0].poster),
+    imageHeaders: imageHeaders(),
     overview: '按最新、热度和评分浏览剧OK的' + category.title + '资源。',
     metadataText: '分类入口',
     badges: ['剧OK', category.title],
@@ -748,6 +758,7 @@ function buildSeason(detail, params) {
         seasonNumber: 1,
         overview: firstNonEmpty(episode.title, episode.pubdate, detail.description, detail.comment),
         poster: imageURL(firstNonEmpty(episode.cdn_v_cover, episode.v_cover, episode.cover, detail.cdncover, detail.cover)),
+        imageHeaders: imageHeaders(),
         action: {
           type: 'play',
           itemId: '/detail/' + params.cat + '/' + params.id,
@@ -892,6 +903,7 @@ function mapSearch360Item(item) {
     type,
     poster,
     backdrop: poster,
+    imageHeaders: imageHeaders(),
     overview: item.description,
     year: yearFrom(item.year),
     rating: scoreValue(item.score),
@@ -919,6 +931,7 @@ function mapExternalSearchItem(item) {
     type,
     poster,
     backdrop: poster,
+    imageHeaders: imageHeaders(),
     overview: firstNonEmpty(item.vod_content, item.description),
     year: yearFrom(item.vod_year),
     remarks: item.vod_remarks,
@@ -949,6 +962,9 @@ function externalDetailFromSearch(item) {
     type,
     poster,
     backdrop: poster,
+    imageHeaders: imageHeaders(),
+    posterHeaders: imageHeaders(),
+    backdropHeaders: imageHeaders(),
     detailImageAspectRatio: '2:3',
     overview: firstNonEmpty(item.vod_content, item.description, item.vod_remarks),
     year: yearFrom(item.vod_year),

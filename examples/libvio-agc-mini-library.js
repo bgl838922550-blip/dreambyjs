@@ -7,6 +7,14 @@ const LIBVIO_LOGO = 'https://www.libvio.lat/favicon.ico';
 const LIBVIO_UA =
   'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1';
 
+function imageHeaders(base, referer) {
+  const resolvedBase = base || LIBVIO_DEFAULT_BASE;
+  return {
+    'User-Agent': LIBVIO_UA,
+    Referer: referer || resolvedBase + '/'
+  };
+}
+
 const LIBVIO_TYPES = [
   { id: 1, alias: 'movie', title: '电影', type: 'movie', style: 'discover.spotlight' },
   { id: 2, alias: 'drama', title: '电视剧', type: 'series', style: 'discover.ranked' },
@@ -210,6 +218,9 @@ function getDetail(ctx) {
     type: mediaType,
     poster: poster,
     backdrop: poster,
+    imageHeaders: imageHeaders(base, detailReferer(base, itemId)),
+    posterHeaders: imageHeaders(base, detailReferer(base, itemId)),
+    backdropHeaders: imageHeaders(base, detailReferer(base, itemId)),
     year: numberValue(labeledValue(html, ['年份', '年代']) || firstMatch(html, /(?:年份|年代)[^0-9]*(\d{4})/i), undefined),
     genres: splitList(labeledValue(html, ['类型'])).concat((typeById(parsed.typeId) || {}).title || []).filter(Boolean),
     areas: splitList(labeledValue(html, ['地区'])),
@@ -452,6 +463,7 @@ function parseVodItem(base, block, typeId, rank) {
     type: type,
     poster: poster,
     backdrop: poster,
+    imageHeaders: imageHeaders(base),
     subtitle: remarks || ((typeById(typeId) || {}).title || ''),
     overview: remarks || '',
     rank: rank,
@@ -726,6 +738,7 @@ function categoryEntry(base, type, previewItems) {
     type: 'collection',
     poster: (first && first.poster) || LIBVIO_LOGO,
     backdrop: (first && first.backdrop) || (first && first.poster) || LIBVIO_LOGO,
+    imageHeaders: imageHeaders(base),
     overview: '浏览 LIBVIO ' + type.title + '资源。',
     metadataText: '分类入口',
     badges: [type.title],
@@ -747,8 +760,7 @@ function playback(url, referer, base) {
       'User-Agent': LIBVIO_UA,
       Referer: referer || base || LIBVIO_DEFAULT_BASE
     },
-    streamKind: 'vod',
-    prefersDirectAVPlayer: /\.m3u8(?:$|\?)/i.test(finalURL)
+    streamKind: 'vod'
   };
 }
 
@@ -979,9 +991,24 @@ function isHexString(value) {
 }
 
 function containerFromURL(url) {
-  const lower = String(url || '').split('?')[0].toLowerCase();
-  const match = /\.([a-z0-9]+)$/.exec(lower);
-  return match ? match[1] : '';
+  const lower = String(url || '').split('#')[0].toLowerCase();
+  const path = lower.split('?')[0];
+  const match = /\.([a-z0-9]+)$/.exec(path);
+  if (match) return match[1];
+  const query = lower.indexOf('?') >= 0 ? lower.slice(lower.indexOf('?') + 1) : '';
+  const candidates = ['m3u8', 'm3u', 'mpd', 'mp4', 'mkv', 'mov', 'flv', 'ts', 'webm', 'avi'];
+  for (let index = 0; index < candidates.length; index += 1) {
+    const ext = candidates[index];
+    if (
+      query.indexOf('.' + ext) >= 0 ||
+      query.indexOf('%2e' + ext) >= 0 ||
+      query.indexOf('=' + ext) >= 0 ||
+      query.indexOf('%3d' + ext) >= 0
+    ) {
+      return ext;
+    }
+  }
+  return '';
 }
 
 function safeDecodeURIComponent(value) {

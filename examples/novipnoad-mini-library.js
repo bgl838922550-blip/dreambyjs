@@ -67,6 +67,13 @@ const WidgetMetadata = {
     'NO视频自定义媒体库示例。首页按自定义媒体库协议懒加载；站点启用 Cloudflare 时仍由 App 浏览器代理或 cf_clearance Cookie 处理。'
 };
 
+function imageHeaders(referer) {
+  return {
+    'User-Agent': UA,
+    Referer: referer || BASE + '/'
+  };
+}
+
 function getManifest() {
   return {
     id: WidgetMetadata.id,
@@ -477,6 +484,7 @@ function parseCard(block, fallbackTitle, rank) {
     type: mediaTypeFrom(href, rawTitle, block),
     poster: image,
     backdrop: image,
+    imageHeaders: imageHeaders(siteURL(id)),
     overview: stripTags(
       firstMatch(block, /<div[^>]+class=["'][^"']*(?:gv-ex|item-content)[^"']*["'][^>]*>([\s\S]*?)<\/div>/i)
     ),
@@ -642,6 +650,7 @@ function categoryShortcutItem(category, rank, previewItems) {
     mediaType: 'collection',
     poster: image,
     backdrop: image,
+    imageHeaders: imageHeaders(siteURL(category.id)),
     overview: categoryOverview(category),
     summary: categoryOverview(category),
     plot: categoryOverview(category),
@@ -1123,6 +1132,9 @@ function getDetail(ext) {
     type,
     poster,
     backdrop: poster,
+    imageHeaders: imageHeaders(siteURL(itemId)),
+    posterHeaders: imageHeaders(siteURL(itemId)),
+    backdropHeaders: imageHeaders(siteURL(itemId)),
     detailImageAspectRatio: MINI_LIBRARY_HERO_ASPECT_RATIO,
     overview: parseOverviewFromDetail(html),
     year: parseYear(rawTitle),

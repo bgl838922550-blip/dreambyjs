@@ -23,6 +23,13 @@ const MAX_CHANNEL_ALTERNATES = 16;
 const SOURCE_PREVIEW_CHANNEL_LIMIT = 5;
 const HUYA_YQK_URL = 'http://add.aptvapp.com/https://cdn.jsdelivr.net/gh/Kimentanm/aptv@master/m3u/yqk.m3u';
 
+function imageHeaders(referer) {
+  return {
+    Referer: referer || 'https://aptv.app/',
+    'User-Agent': USER_AGENT
+  };
+}
+
 const BUILT_IN_SOURCES = [
   {
     id: 'jsnzkpg-live',
@@ -478,6 +485,7 @@ function parseM3UContent(content, config) {
         headers: current.headers || {},
         poster: config.direction === 'V' ? logo : logo,
         backdrop: config.direction === 'V' ? logo : (current.logo || placeholderImage(title, config, true)),
+        imageHeaders: imageHeaders(config.url),
       });
       current = null;
     }
@@ -502,6 +510,7 @@ function channelItem(channel) {
     type: 'live',
     poster: channel.poster || FALLBACK_POSTER_IMAGE,
     backdrop: channel.backdrop || channel.poster || FALLBACK_WIDE_IMAGE,
+    imageHeaders: channel.imageHeaders || imageHeaders(channel.url),
     metadataText: channel.group,
     overview: channel.url,
     badges: playbackStatusBadges(status, lineCount),
@@ -537,6 +546,7 @@ function groupEntry(source, group, index) {
     type: 'collection',
     poster: first.poster || FALLBACK_POSTER_IMAGE,
     backdrop: first.backdrop || first.poster || FALLBACK_WIDE_IMAGE,
+    imageHeaders: first.imageHeaders || imageHeaders(source.url),
     overview: `浏览 ${group.title} 分组下的直播频道。`,
     metadataText: '直播分组',
     badges: ['直播', '分组'],
@@ -561,6 +571,7 @@ function errorEntry(source, error) {
     type: 'collection',
     poster: FALLBACK_POSTER_IMAGE,
     backdrop: FALLBACK_WIDE_IMAGE,
+    imageHeaders: imageHeaders(source.url),
     overview: error && error.message ? error.message : String(error || '加载失败'),
     metadataText: '直播源',
     badges: ['直播', '失败'],

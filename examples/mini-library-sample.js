@@ -4,6 +4,10 @@ const poster =
   'https://image.tmdb.org/t/p/w500/8cdWjvZQUExUUTzyp4t6EDMubfO.jpg';
 const backdrop =
   'https://image.tmdb.org/t/p/w1280/7RyHsO4yDXtBv1zUU3mTpHeQ0d5.jpg';
+const sampleImageHeaders = {
+  Referer: 'https://www.themoviedb.org/',
+  'User-Agent': 'Mozilla/5.0'
+};
 
 function getManifest() {
   return {
@@ -52,6 +56,7 @@ function media(id, index) {
     type: index % 3 === 0 ? 'series' : 'movie',
     poster,
     backdrop,
+    imageHeaders: sampleImageHeaders,
     year: 2026,
     rating: 8 + (index % 10) / 10,
     rank: index,
@@ -70,6 +75,7 @@ function categoryEntry(id, title, index, previewItems) {
     type: 'collection',
     poster: previewItems[0]?.backdrop || backdrop,
     backdrop: previewItems[0]?.backdrop || backdrop,
+    imageHeaders: sampleImageHeaders,
     overview: `浏览${title}中的代表性影视资源。`,
     metadataText: '分类入口',
     badges: ['分类', '榜单'],
@@ -175,6 +181,9 @@ function getDetail(ext) {
     type: itemId.indexOf('series') >= 0 ? 'series' : 'movie',
     poster,
     backdrop,
+    imageHeaders: sampleImageHeaders,
+    posterHeaders: sampleImageHeaders,
+    backdropHeaders: sampleImageHeaders,
     year: 2026,
     rating: 8.6,
     runtimeMinutes: 126,

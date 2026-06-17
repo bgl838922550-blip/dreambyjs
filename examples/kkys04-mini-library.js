@@ -6,6 +6,13 @@ const COOKIE_KEY = 'kkys04.cdndefend.cookie';
 const UA =
   'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1';
 
+function imageHeaders(referer) {
+  return {
+    'User-Agent': UA,
+    Referer: referer || BASE + '/'
+  };
+}
+
 function absolute(path) {
   if (!path) return '';
   if (/^https?:\/\//i.test(path)) return path;
@@ -324,6 +331,7 @@ function parseCards(html, fallbackTitle) {
       title,
       type: mediaTypeFromLabel(typeLabel, block),
       poster: pickImage(block),
+      imageHeaders: imageHeaders(),
       rating: parseRating(block),
       remarks: parseRemarks(block),
       badges: typeLabel ? [typeLabel] : [],
@@ -352,6 +360,7 @@ function parseCarousel(html) {
       type: 'movie',
       poster: image,
       backdrop: image,
+      imageHeaders: imageHeaders(),
       subtitle: parseRemarks(block),
       remarks: parseRemarks(block),
       overview: parseOverview(block),
@@ -382,6 +391,7 @@ function parseTopicCards(html) {
       type: 'collection',
       poster: image,
       backdrop: image,
+      imageHeaders: imageHeaders(),
       remarks: parseRemarks(block),
       action: { type: 'category', pageId: id, title }
     });
@@ -589,6 +599,9 @@ function getDetail(ext) {
     type: seasons.length || /电视剧|连续剧|剧集|国产剧|日韩剧|欧美剧|港台剧|短剧|动漫/.test(html) ? 'series' : 'movie',
     poster,
     backdrop: poster,
+    imageHeaders: imageHeaders(absolute(itemId)),
+    posterHeaders: imageHeaders(absolute(itemId)),
+    backdropHeaders: imageHeaders(absolute(itemId)),
     overview,
     year: Number(firstMatch(html, /年份[^0-9]*(\d{4})/i)) || undefined,
     genres: (firstMatch(html, /类型[^<]*<\/[^>]+>\s*<[^>]+>([\s\S]*?)<\/[^>]+>/i) || '')

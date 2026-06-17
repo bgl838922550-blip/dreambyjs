@@ -1622,6 +1622,9 @@ function normalizeDetail(detail, originalInput) {
     type: "movie",
     poster: detail.posterPath || base.posterPath || "",
     backdrop: detail.backdropPath || detail.posterPath || base.backdropPath || "",
+    imageHeaders: jableImageHeaders(base.id || base.url || base.link || JABLE_BASE_URL + "/"),
+    posterHeaders: jableImageHeaders(base.id || base.url || base.link || JABLE_BASE_URL + "/"),
+    backdropHeaders: jableImageHeaders(base.id || base.url || base.link || JABLE_BASE_URL + "/"),
     detailImageAspectRatio: detail.detailImageAspectRatio || detail.imageAspectRatio || base.aspectRatio || "",
     imageAspectRatio: detail.imageAspectRatio || detail.detailImageAspectRatio || base.aspectRatio || "",
     backdropAspectRatio: detail.backdropAspectRatio || detail.detailImageAspectRatio || detail.imageAspectRatio || "",
@@ -1680,6 +1683,7 @@ function categoryShortcutItem(category, rank, previewItems = []) {
     posterPath: image,
     backdrop: image,
     backdropPath: image,
+    imageHeaders: jableImageHeaders(),
     thumbnailURL: image,
     overview: categoryOverview(category),
     summary: categoryOverview(category),
@@ -2051,6 +2055,7 @@ function toMiniMediaItem(item, rank, category) {
     type: "movie",
     poster,
     backdrop: firstNonEmpty(item.backdrop, item.backdropPath, poster),
+    imageHeaders: jableImageHeaders(link || JABLE_BASE_URL + "/"),
     overview,
     summary: overview,
     plot: overview,
@@ -3448,6 +3453,13 @@ function absolutizeUrl(url, base = JABLE_BASE_URL) {
     return `${String(base).replace(/[#?].*$/, "").replace(/\/[^/]*$/, "/")}${value}`;
   }
   return value;
+}
+
+function jableImageHeaders(referer) {
+  return {
+    "User-Agent": JABLE_HEADERS["User-Agent"],
+    Referer: absolutizeUrl(referer || JABLE_BASE_URL + "/"),
+  };
 }
 
 function setQueryParam(url, name, value) {

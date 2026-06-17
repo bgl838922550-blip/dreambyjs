@@ -9,6 +9,13 @@ const LOGO =
     '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96"><defs><linearGradient id="g" x1="10" y1="8" x2="86" y2="88" gradientUnits="userSpaceOnUse"><stop stop-color="#ff4f6d"/><stop offset=".48" stop-color="#7c5cff"/><stop offset="1" stop-color="#20d4b8"/></linearGradient></defs><rect width="96" height="96" rx="24" fill="#101018"/><rect x="14" y="13" width="68" height="70" rx="18" fill="url(#g)"/><rect x="24" y="25" width="48" height="8" rx="4" fill="white" opacity=".92"/><rect x="24" y="43" width="24" height="8" rx="4" fill="white" opacity=".82"/><path d="M39 61.5v-15l14 7.5-14 7.5Z" fill="white"/><rect x="24" y="68" width="48" height="6" rx="3" fill="white" opacity=".75"/></svg>'
   );
 
+function imageHeaders(referer) {
+  return {
+    'User-Agent': UA,
+    Referer: referer || BASE + '/'
+  };
+}
+
 const WidgetMetadata = {
   id: 'baiplay_baixiaotang_shortdrama',
   title: '短剧天天看',
@@ -460,6 +467,7 @@ function categoryEntry(entry, previewItems) {
     style: entry.style || 'discover.annualWidePreview',
     poster: previewItems && previewItems[0] && previewItems[0].poster,
     backdrop: previewItems && previewItems[0] && previewItems[0].poster,
+    imageHeaders: imageHeaders(),
     previewItems: previewItems || [],
     itemAspectRatio: '2:3',
     imageOrientation: 'portrait',
@@ -482,6 +490,7 @@ function topicEntry(entry, previewItems) {
     style: 'discover.annualListPreview',
     poster: previewItems && previewItems[0] && previewItems[0].poster,
     backdrop: previewItems && previewItems[0] && previewItems[0].poster,
+    imageHeaders: imageHeaders(),
     previewItems: previewItems || [],
     itemAspectRatio: '2:3',
     imageOrientation: 'portrait',
@@ -609,6 +618,9 @@ function parseDetail(html, itemId) {
     originalTitle: title,
     poster,
     backdrop: poster,
+    imageHeaders: imageHeaders(absolute(itemId)),
+    posterHeaders: imageHeaders(absolute(itemId)),
+    backdropHeaders: imageHeaders(absolute(itemId)),
     detailImageAspectRatio: '2:3',
     imageAspectRatio: '2:3',
     posterAspectRatio: '2:3',
@@ -716,6 +728,7 @@ function mediaItem(input) {
     poster: input.poster,
     cover: input.poster,
     backdrop: input.poster,
+    imageHeaders: imageHeaders(),
     subtitle,
     description: cleanText(input.description),
     overview: cleanText(input.description),
