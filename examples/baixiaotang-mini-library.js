@@ -120,9 +120,9 @@ function getManifest() {
       shortFeed: true,
       aggregation: true,
       playbackHistory: true,
-      resourceMatching: false,
+      resourceMatching: true,
       resourceMatch: {
-        enabled: false,
+        enabled: true,
         parameters: [
           'tmdbId',
           'imdbId',
@@ -139,7 +139,7 @@ function getManifest() {
     aggregation: {
       search: true,
       playbackHistory: true,
-      resourceMatching: false
+      resourceMatching: true
     }
   };
 }
@@ -426,6 +426,40 @@ function getSearch(ctx) {
 
 function onSearch(ctx) {
   return search(ctx || {});
+}
+
+function matchResources(ctx) {
+  const args = ctx || {};
+  const titles = matchCandidateTitles(args).slice(0, 5);
+  const expectedType = expectedMatchType(args);
+  const targetYear = numberValue(args.year || args.releaseYear, 0);
+  const targetSeasonYear = numberValue(args.seasonYear || args.targetSeasonYear, 0);
+  const results = [];
+  const seen = {};
+
+  for (let index = 0; index < titles.length && results.length < 8; index += 1) {
+    const page = search(Object.assign({}, args, { query: titles[index], page: 1 }));
+    (page.items || []).forEach(function (item) {
+      if (!item || seen[item.id]) return;
+      if (expectedType && item.type !== expectedType) return;
+      if ((targetYear || targetSeasonYear) && item.year &&
+          (!targetYear || Math.abs(Number(item.year) - targetYear) > 1) &&
+          (!targetSeasonYear || Math.abs(Number(item.year) - targetSeasonYear) > 2)) return;
+      seen[item.id] = true;
+      results.push(item);
+    });
+    if (results.length > 0) break;
+  }
+
+  return { results };
+}
+
+function matchMovie(ctx) {
+  return matchResources(Object.assign({}, ctx || {}, { mediaType: 'movie' }));
+}
+
+function matchEpisode(ctx) {
+  return matchResources(Object.assign({}, ctx || {}, { mediaType: 'tv' }));
 }
 
 function getCategories() {
@@ -1496,6 +1530,24 @@ function unique(values) {
   });
 }
 
+function matchCandidateTitles(ext) {
+  return unique(
+    []
+      .concat(ext.query || ext.keyword || ext.title || ext.name || [])
+      .concat(ext.originalTitle || ext.originalName || [])
+      .concat(ext.alternativeTitles || [])
+      .concat(ext.searchTitles || [])
+      .concat(ext.titles || [])
+  );
+}
+
+function expectedMatchType(ext) {
+  const mediaType = String((ext && (ext.mediaType || ext.type)) || '').toLowerCase();
+  if (mediaType === 'movie') return 'movie';
+  if (mediaType === 'tv' || mediaType === 'series') return 'series';
+  return '';
+}
+
 function escapeRegExp(value) {
   return String(value || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
@@ -1531,6 +1583,9 @@ const BaixiaotangMiniLibrary = {
   getResourceVersions,
   resolvePlayback,
   search,
+  matchResources,
+  matchMovie,
+  matchEpisode,
   getSearch,
   onSearch,
   getCategories,
@@ -1567,6 +1622,9 @@ if (typeof globalThis !== 'undefined') {
   globalThis.getResourceVersions = getResourceVersions;
   globalThis.resolvePlayback = resolvePlayback;
   globalThis.search = search;
+  globalThis.matchResources = matchResources;
+  globalThis.matchMovie = matchMovie;
+  globalThis.matchEpisode = matchEpisode;
   globalThis.getSearch = getSearch;
   globalThis.onSearch = onSearch;
   globalThis.getCategories = getCategories;

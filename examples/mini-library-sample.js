@@ -114,6 +114,12 @@ function getHome() {
         items
       },
       {
+        id: 'ranked-poster-compact',
+        title: '竖版热度榜',
+        style: 'discover.rankedPosterCompact',
+        items: items.slice(0, 10)
+      },
+      {
         id: 'spotlight',
         title: '焦点推荐',
         style: 'discover.spotlight',

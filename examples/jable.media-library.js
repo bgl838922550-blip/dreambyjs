@@ -23,7 +23,7 @@ const JABLE_HEADERS = {
 };
 
 const JABLE_PLAY_HEADERS = {
-  "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
+  "User-Agent": JABLE_HEADERS["User-Agent"],
   Origin: JABLE_BASE_URL,
 };
 
@@ -31,6 +31,7 @@ const SOURCE_PAGE_LIMIT = 24;
 const CATEGORY_PREVIEW_ITEM_LIMIT = 10;
 const CATEGORY_PREVIEW_CONCURRENCY = 3;
 const CATEGORY_PREVIEW_CACHE = {};
+const CATEGORY_PREVIEW_CACHE_TTL_MS = 5 * 60 * 1000;
 
 const JABLE_SORTS = {
   latest: "post_date",
@@ -564,7 +565,7 @@ var WidgetMetadata = {
   description: "Jable 自定义媒体库示例，支持分类海报墙、搜索、详情资源和原生播放器调用。",
   author: "baiPlay",
   site: JABLE_BASE_URL,
-  version: "1.0.0",
+  version: "1.1.0",
   requiredVersion: "0.0.2",
   detailCacheDuration: 60,
   modules: [
@@ -689,8 +690,14 @@ async function getCategories() {
 
 async function getHome(ctx = {}) {
   const sections = [];
+  const firstCategory = findCategory(JABLE_HOME_MEDIA_SECTION_IDS[0]);
+  // Load one real section before returning the page so authorization/network
+  // failures reach the page's retry UI instead of becoming empty lazy rows.
+  const firstSection = await loadHomeMediaSection(firstCategory, 1);
+  if (!firstSection.items.length) throw new Error("Jable 首页暂未返回内容，请刷新重试");
+  sections.push(firstSection);
 
-  for (let index = 0; index < JABLE_HOME_MEDIA_SECTION_IDS.length; index += 1) {
+  for (let index = 1; index < JABLE_HOME_MEDIA_SECTION_IDS.length; index += 1) {
     const categoryId = JABLE_HOME_MEDIA_SECTION_IDS[index];
     const category = findCategory(categoryId);
     sections.push(lazyHomeMediaSection(category, index + 1));
@@ -699,14 +706,16 @@ async function getHome(ctx = {}) {
   for (const definition of JABLE_HOME_SECTION_DEFINITIONS) {
     const items = categoryShortcutItems(definition.ids);
     if (!items.length) continue;
-    sections.push(lazyHomeDefinitionSection(definition, items));
+    // Category navigation is immediately usable from its artwork and any
+    // successful list cache. Do not issue dozens of preview-only requests.
+    sections.push(lazyHomeDefinitionSection(definition, items, false));
   }
 
   return {
     pageType: "home",
     title: JABLE_TITLE,
     heroAspectRatio: "16:9",
-    hero: [],
+    hero: firstSection.items.slice(0, 6).map(toHeroMediaItem),
     sections,
   };
 }
@@ -723,7 +732,7 @@ async function getHomeSection(ctx = {}) {
 
   const definition = JABLE_HOME_SECTION_DEFINITIONS.find((item) => item.id === sectionId);
   if (definition) {
-    const items = await categoryShortcutItemsWithPreviews(definition.ids);
+    const items = categoryShortcutItems(definition.ids);
     return lazyHomeDefinitionSection(definition, items, false);
   }
 
@@ -787,21 +796,17 @@ async function loadHomeMediaSection(category, sectionIndex) {
       sectionIndex
     );
   }
-  try {
-    const items = await loadPosterWall({
-      categoryId: category.id,
-      page: 1,
-      sort_by: defaultSortForCategory(category),
-    });
-    const mediaItems = items
-      .map((item, index) => toMiniMediaItem(item, index + 1, category))
-      .filter(Boolean)
-      .slice(0, 12);
-    return completedHomeMediaSection(category, mediaItems, sectionIndex);
-  } catch (error) {
-    logInfo(`Jable home section skipped (${category.id}): ` + (error && error.message ? error.message : error));
-    return completedHomeMediaSection(category, [], sectionIndex);
-  }
+  const items = await loadPosterWall({
+    categoryId: category.id,
+    page: 1,
+    sort_by: defaultSortForCategory(category),
+  });
+  const mediaItems = items
+    .map((item, index) => toMiniMediaItem(item, index + 1, category))
+    .filter(Boolean)
+    .slice(0, 12);
+  cacheCategoryPreviewItems(category, mediaItems);
+  return completedHomeMediaSection(category, mediaItems, sectionIndex);
 }
 
 function completedHomeMediaSection(category, items, sectionIndex) {
@@ -1011,11 +1016,7 @@ async function loadPageSections(params = {}) {
   }
 
   const response = await httpGet(url, { headers: JABLE_HEADERS });
-  if (!response || !response.data || typeof response.data !== "string") {
-    throw new Error("\u65e0\u6cd5\u83b7\u53d6\u6709\u6548\u7684HTML\u5185\u5bb9");
-  }
-
-  const htmlContent = response.data;
+  const htmlContent = htmlFromAsyncPayload(getResponseText(response));
   if (!htmlContent) {
     throw new Error("Jable returned empty list html.");
   }
@@ -1455,7 +1456,8 @@ async function matchEpisode(ctx = {}) {
 async function getPlayback(input) {
   const ext = argsify(input);
   const source = Object.keys(ext).length ? ext : input;
-  const directUrl = firstNonEmpty(ext.playUrl, ext.videoUrl, isPlayableDirectUrl(ext.url) ? ext.url : "");
+  const directUrl = [ext.playUrl, ext.videoUrl, ext.url, typeof input === "string" ? input : ""]
+    .find(isPlayableDirectUrl);
   if (directUrl) {
     return playbackFromDirectUrl(directUrl, ext);
   }
@@ -1476,25 +1478,32 @@ async function getPlayback(input) {
 }
 
 async function getResourceVersions(ctx = {}) {
-  const detail = await getDetail(ctx);
-  return detail.resourceGroups || [];
+  // Versions describe the page, not an expiring CDN URL. Do not reload detail
+  // metadata and recommendations just to offer the single playback line.
+  const context = buildDetailContext(ctx);
+  if (!isJableVideoUrl(context.url)) throw new Error("Jable 视频页面地址无效");
+  return buildMiniResourceGroups({
+    id: context.itemId,
+    title: context.title,
+    durationText: context.durationText,
+    customHeaders: { ...JABLE_PLAY_HEADERS, Referer: context.url },
+  });
 }
 
 async function resolvePlayback(ctx = {}) {
   const ext = argsify(ctx);
-  const directUrl = firstNonEmpty(ext.playUrl, ext.videoUrl, isPlayableDirectUrl(ext.url) ? ext.url : "");
+  const directUrl = [ext.playUrl, ext.videoUrl, ext.url, typeof ctx === "string" ? ctx : ""]
+    .find(isPlayableDirectUrl);
   if (directUrl) {
     return playbackFromDirectUrl(directUrl, ext);
   }
-  const playback = await getPlayback(ext);
+  const playback = await getPlayback(ctx);
   return {
     url: playback.url,
     container: playback.container || "m3u8",
     headers: playback.headers || playback.header || {},
     subtitles: [],
     danmaku: null,
-    startPosition: 0,
-    preferDirectAVPlayer: true,
   };
 }
 
@@ -1651,7 +1660,9 @@ function categoryShortcutItems(categoryIds) {
     ? categoryIds.map((id) => JABLE_ALL_CATEGORIES.find((item) => item.id === id)).filter(Boolean)
     : JABLE_ALL_CATEGORIES.slice(0, 48);
 
-  return categories.map((category, index) => categoryShortcutItem(category, index + 1));
+  return categories.map((category, index) => categoryShortcutItem(
+    category, index + 1, cachedCategoryPreviewItems(category)
+  ));
 }
 
 async function categoryShortcutItemsWithPreviews(categoryIds) {
@@ -1713,10 +1724,8 @@ function categoryShortcutItem(category, rank, previewItems = []) {
 
 async function loadCategoryPreviewItems(category) {
   if (!category || !category.id) return [];
-  const cacheKey = categoryPreviewCacheKey(category);
-  if (CATEGORY_PREVIEW_CACHE[cacheKey]) {
-    return CATEGORY_PREVIEW_CACHE[cacheKey];
-  }
+  const cached = cachedCategoryPreviewItems(category);
+  if (cached.length) return cached;
 
   try {
     const items = await loadPosterWall({
@@ -1728,11 +1737,10 @@ async function loadCategoryPreviewItems(category) {
       .map((item, index) => toMiniMediaItem(item, index + 1, category))
       .filter((item) => item && firstNonEmpty(item.backdrop, item.poster))
       .slice(0, CATEGORY_PREVIEW_ITEM_LIMIT);
-    CATEGORY_PREVIEW_CACHE[cacheKey] = previewItems;
+    cacheCategoryPreviewItems(category, previewItems);
     return previewItems;
   } catch (error) {
     logInfo(`Jable category preview skipped (${category.id}): ` + (error && error.message ? error.message : error));
-    CATEGORY_PREVIEW_CACHE[cacheKey] = [];
     return [];
   }
 }
@@ -1743,8 +1751,23 @@ function cacheCategoryPreviewItems(category, items) {
     .filter((item) => item && firstNonEmpty(item.backdrop, item.poster, item.backdropPath, item.posterPath, item.thumbnailURL))
     .slice(0, CATEGORY_PREVIEW_ITEM_LIMIT);
   if (previewItems.length) {
-    CATEGORY_PREVIEW_CACHE[categoryPreviewCacheKey(category)] = previewItems;
+    CATEGORY_PREVIEW_CACHE[categoryPreviewCacheKey(category)] = {
+      items: previewItems,
+      expiresAt: Date.now() + CATEGORY_PREVIEW_CACHE_TTL_MS,
+    };
   }
+}
+
+function cachedCategoryPreviewItems(category) {
+  if (!category || !category.id) return [];
+  const key = categoryPreviewCacheKey(category);
+  const entry = CATEGORY_PREVIEW_CACHE[key];
+  if (!entry) return [];
+  if (!Array.isArray(entry.items) || !entry.items.length || entry.expiresAt <= Date.now()) {
+    delete CATEGORY_PREVIEW_CACHE[key];
+    return [];
+  }
+  return entry.items;
 }
 
 function categoryPreviewCacheKey(category) {
@@ -2132,9 +2155,11 @@ function buildMiniResourceGroups(detail) {
 
 function playbackFromDirectUrl(url, ext = {}) {
   const link = absolutizeUrl(url);
-  const referer = firstNonEmpty(ext.referer, ext.refererUrl, ext.itemId, ext.link, ext.id, JABLE_BASE_URL + "/");
+  const referer = firstNonEmpty(ext.referer, ext.refererUrl, detailPayloadUrl(ext.itemId), ext.link,
+    isJableVideoUrl(ext.itemId) ? ext.itemId : "", JABLE_BASE_URL + "/");
   const container = inferContainer(link);
-  const headers = ext.headers || ext.header || ext.customHeaders || { ...JABLE_PLAY_HEADERS, Referer: absolutizeUrl(referer) };
+  const headers = { ...JABLE_PLAY_HEADERS, Referer: absolutizeUrl(referer),
+    ...(ext.headers || ext.header || ext.customHeaders || {}) };
   return {
     id: ext.versionId || ext.id || link,
     title: ext.title || ext.name || "Jable HLS",
@@ -2148,8 +2173,6 @@ function playbackFromDirectUrl(url, ext = {}) {
     headers,
     subtitles: [],
     danmaku: null,
-    startPosition: 0,
-    preferDirectAVPlayer: container === "m3u8" || container === "mpd" || container === "ts",
     mediaSourceId: ext.versionId || `${link}#direct`,
   };
 }
@@ -2300,21 +2323,99 @@ function toForwardVideoItem({
   };
 }
 
-function extractHlsUrl(html) {
-  return (
-    extractMatch(html, /var\s+hlsUrl\s*=\s*["']([^"']+)["']/i) ||
-    extractMatch(html, /hlsUrl\s*[:=]\s*["']([^"']+\.m3u8[^"']*)["']/i) ||
-    extractMatch(html, /["'](https?:\/\/[^"']+\.m3u8[^"']*)["']/i) ||
-    extractMatch(html, /source\s+src=["']([^"']+\.m3u8[^"']*)["']/i)
+function decodeJableStringLiteral(literal) {
+  return String(literal || "").slice(1, -1).replace(
+    /\\(?:u([\da-f]{4})|x([\da-f]{2})|([\s\S]))/gi,
+    (_, unicode, hex, escaped) => unicode || hex
+      ? String.fromCharCode(parseInt(unicode || hex, 16))
+      : ({ n: "\n", r: "\r", t: "\t", b: "\b", f: "\f" }[escaped] || escaped)
   );
+}
+
+function jableHlsURL(value, pageURL = JABLE_BASE_URL + "/") {
+  const raw = decodeHtml(value).trim();
+  if (/^[a-z][a-z\d+.-]*:/i.test(raw) && !/^https?:\/\//i.test(raw)) return "";
+  const url = absolutizeUrl(raw, pageURL);
+  if (!/^https?:\/\//i.test(url) || !/\.m3u8?(?:[?#]|$)/i.test(url)) return "";
+  if (/[\s<>"'\\]/.test(url)) return "";
+  if (/(?:^|[/.=_-])(?:ads?|advert|advertising|preroll|preview)(?:[/.=_-]|$)/i.test(url.split(/[?#]/)[0])) return "";
+  return url;
+}
+
+function unpackJablePlayerScripts(html) {
+  const source = String(html || "");
+  if (source.length > 2_000_000) return [];
+  const scripts = [];
+  const blocks = source.match(/<script\b[^>]*>[\s\S]*?<\/script>/gi) || [source];
+  for (const block of blocks) {
+    if (scripts.length >= 4) break;
+    if (!/eval\s*\(\s*function\s*\(\s*p\s*,\s*a\s*,\s*c\s*,\s*k\s*,\s*e\s*,\s*[dr]\s*\)/.test(block)) continue;
+    const args = /}\s*\(\s*('(?:\\.|[^'\\])*'|"(?:\\.|[^"\\])*")\s*,\s*(\d+)\s*,\s*(\d+)\s*,\s*('(?:\\.|[^'\\])*'|"(?:\\.|[^"\\])*")\s*\.split\(\s*['"]\|['"]\s*\)/.exec(block);
+    if (!args) continue;
+    const radix = Number(args[2]), count = Number(args[3]);
+    if (radix < 2 || radix > 62 || count < 1 || count > 10_000) continue;
+    const payload = decodeJableStringLiteral(args[1]);
+    const dictionary = decodeJableStringLiteral(args[4]).split("|");
+    if (payload.length > 200_000 || dictionary.length > 10_000) continue;
+    const alphabet = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
+    // Decode string arguments only. Never evaluate remote player code in the
+    // App's privileged JS context, even if it resembles a familiar packer.
+    scripts.push(payload.replace(/\b[0-9a-zA-Z]+\b/g, word => {
+      let index = 0;
+      for (const character of word) {
+        const digit = alphabet.indexOf(character);
+        if (digit < 0 || digit >= radix) return word;
+        index = index * radix + digit;
+        if (index >= count) return word;
+      }
+      return dictionary[index] || word;
+    }));
+  }
+  return scripts;
+}
+
+function extractHlsUrl(html, pageURL = JABLE_BASE_URL + "/", namedOnly = false) {
+  const source = String(html || "");
+  const decoded = unpackJablePlayerScripts(source);
+  const documents = [source, ...decoded];
+  // The actual player configuration is stronger evidence than arbitrary ad
+  // URLs, video previews or other requests embedded in the same document.
+  for (const document of documents) {
+    const pattern = /\bhls_?url["']?\s*[:=]\s*("(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*')/gi;
+    let match;
+    while ((match = pattern.exec(document))) {
+      const url = jableHlsURL(decodeJableStringLiteral(match[1]), pageURL);
+      if (url) return url;
+    }
+  }
+  if (namedOnly) return "";
+  const candidates = [];
+  // Arbitrary quoted URLs may belong to sponsors. Only accept DOM media
+  // sources here; other dynamic configurations must be observed in WebKit.
+  for (const tag of source.match(/<(?:video|source)\b[^>]*>/gi) || []) {
+    const src = /\bsrc\s*=\s*("(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*')/i.exec(tag);
+    const url = src ? jableHlsURL(decodeJableStringLiteral(src[1]), pageURL) : "";
+    if (url) candidates.push(url);
+  }
+  const urls = unique(candidates);
+  return urls.length === 1 ? urls[0] : "";
+}
+
+function jableBrowserHlsURL(result, pageURL) {
+  const configured = extractHlsUrl(getResponseText(result), pageURL, true);
+  if (configured) return configured;
+  const candidates = (Array.isArray(result.mediaSources) ? result.mediaSources : []).concat(
+    (Array.isArray(result.capturedRequests) ? result.capturedRequests : []).map(entry => entry && entry.url)
+  );
+  const urls = unique(candidates.map(value => jableHlsURL(value, pageURL)).filter(Boolean));
+  if (urls.length > 1) throw new Error("Jable 页面返回多个播放地址，无法确定正片，请刷新后重试");
+  return urls[0] || "";
 }
 
 async function loadPlayback(input) {
   const context = buildDetailContext(input);
   const pageUrl = context.url;
-  if (!pageUrl) {
-    throw new Error("Jable playback url is required.");
-  }
+  if (!isJableVideoUrl(pageUrl)) throw new Error("Jable 视频页面地址无效");
 
   const response = await httpGet(pageUrl, {
     headers: {
@@ -2327,9 +2428,22 @@ async function loadPlayback(input) {
     throw new Error("\u65e0\u6cd5\u83b7\u53d6\u6709\u6548\u7684HTML\u5185\u5bb9");
   }
 
-  const hlsUrl = extractHlsUrl(html);
+  let hlsUrl = extractHlsUrl(html, pageUrl);
+  if (!hlsUrl && typeof Widget !== "undefined" && Widget.browser && typeof Widget.browser.fetch === "function") {
+    // A single browser attempt executes dynamic player setup in WebKit. The
+    // host presents only genuine verification screens and owns cancellation.
+    const browserResult = await Widget.browser.fetch(pageUrl, {
+      visible: false,
+      timeout: 90,
+      waitAfterLoad: 1,
+      waitForMediaSource: true,
+      headers: { ...JABLE_HEADERS, Referer: JABLE_BASE_URL + "/" },
+    });
+    validateJableResponse(browserResult);
+    hlsUrl = jableBrowserHlsURL(browserResult, pageUrl);
+  }
   if (!hlsUrl) {
-    throw new Error("\u65e0\u6cd5\u83b7\u53d6\u6709\u6548\u7684\u64ad\u653e\u5730\u5740\uff0c\u53ef\u80fd\u9700\u8981\u4ee3\u7406\u9a8c\u8bc1");
+    throw new Error("Jable 页面未返回可用的 HLS 地址，请刷新后重试");
   }
 
   return {
@@ -2632,7 +2746,18 @@ function extractFavoriteCountText(html, text) {
 }
 
 function htmlFromAsyncPayload(value) {
-  const raw = String(value || "").trim();
+  if (value && typeof value === "object") return firstHtmlField(value);
+  let raw = String(value || "").trim();
+  // WebKit displays JSON async responses in a <pre> document after a CF
+  // verification. Decode that wrapper without treating it as the video list.
+  const pre = /<pre\b[^>]*>([\s\S]*?)<\/pre>/i.exec(raw);
+  if (pre) {
+    const body = decodeHtml(pre[1]).replace(/&#(?:x([\da-f]+)|(\d+));/gi, (_, hex, decimal) => {
+      const point = parseInt(hex || decimal, hex ? 16 : 10);
+      return point <= 0x10ffff ? String.fromCodePoint(point) : "";
+    });
+    if (/^\s*[\[{]/.test(body)) raw = body.trim();
+  }
   if (!raw) return "";
   if (raw[0] !== "{" && raw[0] !== "[") return raw;
   try {
@@ -2643,33 +2768,27 @@ function htmlFromAsyncPayload(value) {
   }
 }
 
-function firstHtmlField(value) {
-  if (typeof value === "string") return value;
-  if (Array.isArray(value)) {
-    return firstNonEmpty(...value.map(firstHtmlField));
-  }
+function firstHtmlField(value, depth = 0) {
+  if (depth > 8) return "";
+  if (typeof value === "string") return /<[^>]+>/.test(value) ? value : "";
   if (!value || typeof value !== "object") return "";
-  return firstNonEmpty(
-    value.html,
-    value.content,
-    firstHtmlField(value.result),
-    firstHtmlField(value.data),
-    value.text,
-    value.body,
-    value.payload && firstHtmlField(value.payload),
-    value.response && firstHtmlField(value.response)
-  );
+  const keys = Array.isArray(value) ? Object.keys(value) : unique([
+    "html", "content", "result", "data", "text", "body", "payload", "response", ...Object.keys(value),
+  ]);
+  for (const key of keys) {
+    const html = firstHtmlField(value[key], depth + 1);
+    if (html) return html;
+  }
+  return "";
 }
 
 function looksLikeCloudflareChallenge(value) {
   const text = String(value || "").toLowerCase();
-  return text.includes("just a moment")
-    || text.includes("cf-chl-")
-    || text.includes("cf-browser-verification")
-    || text.includes("cf-mitigated")
-    || text.includes("cloudflare ray id")
-    || text.includes("/cdn-cgi/challenge-platform")
-    || (text.includes("cloudflare") && (text.includes("challenge") || text.includes("turnstile")));
+  // Ordinary pages also include Cloudflare JS/beacons. Detect the challenge
+  // document itself so a working list/player is not rejected for its assets.
+  return /<title\b[^>]*>\s*(?:just a moment|attention required|checking your browser|verify you are human)/i.test(text)
+    || /(?:window\.)?_cf_chl_opt\s*=/.test(text)
+    || /id\s*=\s*["'](?:challenge-form|cf-challenge-running|cf-browser-verification)["']/.test(text);
 }
 
 function extractVideoInfoHtml(html) {
@@ -3015,25 +3134,43 @@ function defaultSortOptions() {
 }
 
 async function httpGet(url, options = {}) {
+  // The host performs a single browser verification only after a real CF
+  // challenge, then reuses scoped cookies for subsequent HTTP requests.
+  const requestOptions = { timeout: 20, useBrowserCookie: true, useBrowserFallback: true, ...options };
+  let result;
   if (typeof Widget !== "undefined" && Widget.http && typeof Widget.http.get === "function") {
-    return Widget.http.get(url, options);
-  }
-  if (typeof fetch === "function") {
+    result = await Widget.http.get(url, requestOptions);
+  } else if (typeof fetch === "function") {
     const response = await fetch(url, {
       method: "GET",
-      headers: options.headers || {},
+      headers: requestOptions.headers || {},
     });
     const data = await response.text();
-    return {
+    result = {
       data,
       status: response.status,
       headers: response.headers,
     };
+  } else if (typeof $http !== "undefined" && typeof $http.get === "function") {
+    result = await $http.get(url, requestOptions);
+  } else {
+    throw new Error("No HTTP client is available in this JavaScript runtime.");
   }
-  if (typeof $http !== "undefined" && typeof $http.get === "function") {
-    return $http.get(url, options);
+  validateJableResponse(result);
+  return result;
+}
+
+function validateJableResponse(response) {
+  if (response && response.error) throw new Error(String(response.error));
+  if (response && response.cancelled) throw new Error("Jable 请求已取消");
+  const responseHeaders = (response && response.headers) || {};
+  const challenged = Object.keys(responseHeaders).some(key =>
+    key.toLowerCase() === "cf-mitigated" && /challenge/i.test(String(responseHeaders[key])));
+  if (challenged || looksLikeCloudflareChallenge(getResponseText(response))) {
+    throw new Error("Jable 站点验证尚未完成，请完成验证后刷新重试");
   }
-  throw new Error("No HTTP client is available in this JavaScript runtime.");
+  const status = Number(response && response.status);
+  if (status >= 400) throw new Error(`Jable 请求失败（HTTP ${status}），请稍后重试`);
 }
 
 function getResponseText(response) {
@@ -3049,7 +3186,8 @@ function getResponseText(response) {
   if (typeof response.body === "string") {
     return response.body;
   }
-  return String(response.data || response.body || "");
+  const value = response.data != null ? response.data : response.body;
+  return value && typeof value === "object" ? JSON.stringify(value) : String(value || "");
 }
 
 function hasWidgetHtml() {
@@ -3157,6 +3295,8 @@ function buildDetailContext(input) {
       payload.url,
       detailPayloadUrl(ext.itemId),
       detailPayloadUrl(ext.versionId),
+      isJableVideoUrl(ext.itemId) ? ext.itemId : "",
+      isJableVideoUrl(ext.versionId) ? ext.versionId : "",
       ext.link,
       ext.url,
       ext.id,
@@ -3498,7 +3638,7 @@ function decodeHtml(value) {
     .replace(/&quot;/g, '"')
     .replace(/&#39;/g, "'")
     .replace(/&lt;/g, "<")
-    .replace(/&gt;/g, " ")
+    .replace(/&gt;/g, ">")
     .replace(/&nbsp;/g, " ");
 }
 

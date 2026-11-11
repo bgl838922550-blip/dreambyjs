@@ -1,11 +1,11 @@
 // @name 金牌影院
 
-const JBD_DEFAULT_BASE = 'https://m.jiabaide.cn';
+const JBD_DEFAULT_BASE = 'https://www.hxgnhb.cn';
 const JBD_SIGN_KEY = 'cb808529bae6b6be45ecfab29a4889bc';
 const JBD_LOGO =
   'https://obs.3688baihuo.com/upload/site_logo/20260531-1/31032dae244fccedcad3e30a5effb6d6.png';
 const JBD_ICON =
-  'https://obs.3688baihuo.com/upload/site_ico/20260531-1/53565006f2db042f36d9395e454dc818_180x180.png';
+  'https://obs.3688baihuo.com/upload/site_ico/20260531-1/92da5ddc802c076de628be1b70e6fb90_180x180.png';
 const JBD_UA =
   'Mozilla/5.0 (iPhone; CPU iPhone OS 18_2_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.2 Mobile/15E148 Safari/604.1';
 const JBD_DEVICE_ID = 'baiPlay-jiabaide-11111111-2222-4333-8444-555555555555';
@@ -14,12 +14,12 @@ const WidgetMetadata = {
   id: 'jiabaide-mini-library',
   name: '金牌影院',
   title: '金牌影院',
-  version: '1.0.0',
+  version: '1.2.0',
   author: 'baiPlay',
   logo: JBD_LOGO,
   icon: JBD_ICON,
   site: JBD_DEFAULT_BASE,
-  description: '金牌影院自定义媒体库，支持电影、电视剧、综艺、动漫、短剧、搜索、详情、选集、清晰度选择和播放解析。'
+  description: '同步金牌影院官网轮播、热播、预告、影视分组与体育直播，支持账号 Token、搜索、详情、选集和清晰度选择。'
 };
 
 const JBD_CHANNELS = [
@@ -31,13 +31,13 @@ const JBD_CHANNELS = [
 ];
 
 const JBD_HOME_SECTIONS = [
-  { id: 'jbd-hot-movie', title: '热门电影', typeId: 1, sort: 3, style: 'discover.ranked', mediaType: 'movie' },
-  { id: 'jbd-latest-movie', title: '最新电影', typeId: 1, sort: 1, style: 'discover.posterCompact', mediaType: 'movie' },
-  { id: 'jbd-latest-tv', title: '最新电视剧', typeId: 2, sort: 1, style: 'discover.spotlight', mediaType: 'series' },
-  { id: 'jbd-hot-tv', title: '热门电视剧', typeId: 2, sort: 3, style: 'discover.rankedPosterCompact', mediaType: 'series' },
-  { id: 'jbd-latest-show', title: '最新综艺', typeId: 3, sort: 1, style: 'discover.editorial', mediaType: 'series' },
-  { id: 'jbd-latest-anime', title: '最新动漫', typeId: 4, sort: 1, style: 'discover.posterCompact', mediaType: 'series' },
-  { id: 'jbd-latest-short', title: '短剧上新', typeId: 88, sort: 1, style: 'discover.spotlight', mediaType: 'series' }
+  { id: 'jbd-broadcast', title: '正在热播', dataKey: 'homeBroadcastPageData', module: 3, style: 'discover.posterCompact', mediaType: 'mixed' },
+  { id: 'jbd-trailers', title: '新片预告', dataKey: 'homeTrailerPageData', style: 'discover.spotlight', mediaType: 'mixed' },
+  { id: 'jbd-latest-movie', title: '最新电影', dataKey: 'homeNewMoviePageData', module: 2, typeId: 1, style: 'discover.posterCompact', mediaType: 'movie' },
+  { id: 'jbd-latest-tv', title: '最新电视剧', dataKey: 'newestTvPageData', module: 13, typeId: 2, style: 'discover.posterCompact', mediaType: 'series' },
+  { id: 'jbd-latest-show', title: '最新综艺', dataKey: 'newestVarietyPageData', module: 14, typeId: 3, style: 'discover.posterCompact', mediaType: 'series' },
+  { id: 'jbd-latest-anime', title: '最新动漫', dataKey: 'newestCartoonPageData', module: 15, typeId: 4, style: 'discover.posterCompact', mediaType: 'series' },
+  { id: 'jbd-latest-short', title: '最新短剧', dataKey: 'newestShortTvPageData', module: 16, typeId: 88, style: 'discover.posterCompact', mediaType: 'series' }
 ];
 
 const JBD_SORT_OPTIONS = [
@@ -67,9 +67,9 @@ function getManifest() {
       playback: true,
       aggregation: true,
       playbackHistory: true,
-      resourceMatching: false,
+      resourceMatching: true,
       resourceMatch: {
-        enabled: false,
+        enabled: true,
         parameters: [
           'tmdbId',
           'imdbId',
@@ -88,7 +88,7 @@ function getManifest() {
     aggregation: {
       search: true,
       playbackHistory: true,
-      resourceMatching: false
+      resourceMatching: true
     },
     parameters: [
       {
@@ -97,7 +97,15 @@ function getManifest() {
         type: 'input',
         value: JBD_DEFAULT_BASE,
         required: true,
-        description: '金牌影院接口地址，默认使用移动端接口。'
+        description: '金牌影院站点地址。旧版 jiabaide.cn 地址会自动迁移到当前站点。'
+      },
+      {
+        name: 'Token',
+        title: '登录 Token',
+        type: 'password',
+        value: '',
+        required: false,
+        description: '站点使用 Token 而不是 Cookie 鉴权。请在运行 baiPlay 的同一设备和网络中登录上方配置的站点后复制 localStorage 中的 token；留空使用匿名标清线路。'
       }
     ]
   };
@@ -106,13 +114,9 @@ function getManifest() {
 function getHome(ctx) {
   const args = argsify(ctx);
   const site = siteFromArgs(args);
-  const eager = safeList(site, 1, 1, 12, 1).items;
-  const hero = eager.slice(0, 8).map(function (item, index) {
-    const next = cloneItem(item);
-    next.rank = index + 1;
-    next.aspectRatio = '2:3';
-    return next;
-  });
+  const data = homeData(site, null, 1);
+  const hero = homeBanners(site);
+  const definitions = orderedHomeSections(site);
 
   return {
     pageType: 'home',
@@ -120,36 +124,12 @@ function getHome(ctx) {
     title: WidgetMetadata.title,
     logo: WidgetMetadata.logo,
     icon: WidgetMetadata.icon,
-    heroAspectRatio: '2:3',
+    heroAspectRatio: '32:9',
     hero,
     carousel: hero,
-    sections: [
-      {
-        id: 'jbd-channels',
-        title: '频道入口',
-        style: 'discover.annualWidePreview',
-        lazy: true,
-        loadAction: { type: 'custom', id: 'jbd-channels', sectionId: 'jbd-channels', title: '频道入口' },
-        items: JBD_CHANNELS.map(function (channel, index) {
-          return channelEntry(channel, [], index + 1);
-        })
-      }
-    ].concat(
-      JBD_HOME_SECTIONS.map(function (section) {
-        const eagerItems = section.id === 'jbd-latest-movie' ? eager : [];
-        return {
-          id: section.id,
-          title: section.title,
-          style: section.style,
-          contentType: section.mediaType,
-          lazy: true,
-          promotesToHero: section.id === 'jbd-latest-movie',
-          loadAction: { type: 'custom', id: section.id, sectionId: section.id, title: section.title },
-          moreAction: categoryAction(section.typeId, section.title, section.mediaType, section.sort),
-          items: eagerItems
-        };
-      })
-    )
+    sections: [getSportsSection(site)].concat(definitions.map(function (section) {
+      return buildHomeSection(section, data[section.dataKey]);
+    }))
   };
 }
 
@@ -157,6 +137,8 @@ function getHomeSection(ctx) {
   const args = argsify(ctx);
   const site = siteFromArgs(args);
   const sectionId = stringValue(args.sectionId || args.id || args.pageId);
+
+  if (sectionId === 'jbd-sports') return getSportsSection(site);
 
   if (sectionId === 'jbd-channels') {
     return {
@@ -182,22 +164,118 @@ function getHomeSection(ctx) {
     };
   }
 
-  const list = safeList(site, section.typeId, section.sort || 1, 18, 1);
+  try {
+    return buildHomeSection(section, homeData(site, section, 1)[section.dataKey]);
+  } catch (error) {
+    return Object.assign(buildHomeSection(section, {}), { error: String(error.message || error) });
+  }
+}
+
+function homeData(site, section, page) {
+  const pairs = [['clientType', '1']];
+  if (section && section.module) pairs.push(['modules_type', String(section.module)]);
+  pairs.push(['pageNum', String(numberValue(page, 1))]);
+  const result = apiGet(site, '/api/mw-movie/anonymous/v1/home/all/list', pairs);
+  if (!result || !result.data || typeof result.data !== 'object') {
+    throw new Error('金牌影院首页接口没有返回栏目数据');
+  }
+  return result.data;
+}
+
+function orderedHomeSections(site) {
+  try {
+    const response = apiGet(site, '/api/mw-movie/anonymous/get/filer/type', []);
+    const types = Array.isArray(response && response.data) ? response.data : [];
+    const sections = [];
+    types.forEach(function (type) {
+      const section = JBD_HOME_SECTIONS.filter(function (entry) {
+        return entry.typeId && Number(entry.typeId) === Number(type.typeId);
+      })[0];
+      if (section && sections.indexOf(section) < 0) sections.push(section);
+    });
+    if (sections.length) return JBD_HOME_SECTIONS.slice(0, 2).concat(sections);
+  } catch (error) {
+    // Keep the site's normal channel order if its navigation endpoint is unavailable.
+  }
+  return JBD_HOME_SECTIONS;
+}
+
+function homeBanners(site) {
+  try {
+    const response = apiGet(site, '/api/mw-movie/anonymous/home/banner', [['clientType', '1']]);
+    const banners = Array.isArray(response && response.data) ? response.data : [];
+    return banners.map(function (entry, index) {
+      return { entry, index };
+    }).filter(function (value) {
+      const entry = value.entry || {};
+      const id = numberValue(entry.videoData && entry.videoData.vodId || entry.param, 0);
+      return !numberValue(entry.isAd, 0) && id > 0 &&
+        (entry.img || entry.imgDay) && (entry.videoData && entry.videoData.vodName || entry.name);
+    }).sort(function (left, right) {
+      return numberValue(left.entry.sort, 0) - numberValue(right.entry.sort, 0) || left.index - right.index;
+    }).map(function (value, index) {
+      const entry = value.entry;
+      const raw = Object.assign({}, entry.videoData || {}, {
+        vodId: entry.videoData && entry.videoData.vodId || entry.param,
+        vodName: entry.videoData && entry.videoData.vodName || entry.name
+      });
+      const item = mediaItem(raw, index + 1);
+      item.backdrop = absoluteImage(entry.img || entry.imgDay);
+      item.thumb = item.backdrop;
+      item.poster = item.poster || item.backdrop;
+      item.cover = item.poster;
+      item.aspectRatio = '32:9';
+      item.imageOrientation = 'landscape';
+      item.imageHeaders = item.posterHeaders = item.backdropHeaders = imageHeaders(site + '/');
+      return item;
+    });
+  } catch (error) {
+    // Never replace the official carousel with unrelated latest-film posters.
+    return [];
+  }
+}
+
+function homeSectionItems(section, data, page) {
+  return (Array.isArray(data && data.list) ? data.list : []).map(function (raw, index) {
+    const item = mediaItem(raw, index + 1 + (numberValue(page, 1) - 1) * numberValue(data.pageSize, 12));
+    if (section.id === 'jbd-trailers') {
+      item.poster = absoluteImage(raw.abImage || raw.vodPic);
+      item.cover = item.poster;
+      item.backdrop = absoluteImage(raw.bgImage || raw.vodPic);
+      item.thumb = item.backdrop;
+      item.badges = unique(['预告'].concat(item.badges || []));
+    }
+    return item;
+  });
+}
+
+function buildHomeSection(section, data) {
   return {
     id: section.id,
     title: section.title,
     style: section.style,
     contentType: section.mediaType,
     lazy: false,
-    promotesToHero: section.id === 'jbd-latest-movie',
-    moreAction: categoryAction(section.typeId, section.title, section.mediaType, section.sort),
-    items: list.items.slice(0, 18)
+    promotesToHero: false,
+    moreAction: section.typeId ? categoryAction(section.typeId, section.title, section.mediaType, 1) :
+      section.module ? { type: 'category', id: 'home:' + section.id, pageId: 'home:' + section.id, title: section.title } : undefined,
+    items: homeSectionItems(section, data, 1)
   };
 }
 
 function getCategory(ctx) {
   const args = argsify(ctx);
   const site = siteFromArgs(args);
+  const pageId = stringValue(args.pageId || args.id || args.categoryId);
+  if (pageId === 'sports') return getSportsCategory(site, args);
+  if (pageId.indexOf('home:') === 0) {
+    const section = findById(JBD_HOME_SECTIONS, pageId.slice(5));
+    if (!section) return categoryPage(pageId, WidgetMetadata.title, 'mixed', [], 1, false, [], '');
+    const page = Math.max(1, numberValue(args.page, 1));
+    const data = homeData(site, section, page)[section.dataKey] || {};
+    return categoryPage(pageId, section.title, section.mediaType, homeSectionItems(section, data, page),
+      page, page < numberValue(data.totalPage, 1), [], '');
+  }
   const parsed = parsePageId(args.pageId || args.id || args.categoryId || args.typeId || 'type:1');
   const page = numberValue(args.page, 1);
   const sort = normalizeSort(args.sort || args.sortBy || args.sort_by || args.selectedSortValue || parsed.sort || '1');
@@ -221,6 +299,8 @@ function getCategory(ctx) {
 function getDetail(ctx) {
   const args = argsify(ctx);
   const site = siteFromArgs(args);
+  const sportsId = stringValue(args.itemId || args.id).split('|')[0];
+  if (isSportsItemID(sportsId)) return getSportsDetail(site, sportsId);
   const itemId = numberValue(args.itemId || args.id || args.vodId, 0);
   if (!itemId) throw new Error('金牌影院详情参数为空');
   const data = detailData(site, itemId);
@@ -232,6 +312,9 @@ function getDetail(ctx) {
 function getResourceVersions(ctx) {
   const args = argsify(ctx);
   const site = siteFromArgs(args);
+  const sportsId = stringValue(args.itemId || args.id || args.versionId || args.sourceId).split('|')[0];
+  if (isSportsItemID(sportsId)) return getSportsResourceVersions(site, Object.assign({}, args, { itemId: sportsId }));
+  const token = tokenFromArgs(args);
   const decoded = decodeVersionId(args.versionId || args.id || args.sourceId);
   const itemId = numberValue(args.itemId || args.id || decoded.itemId || args.vodId, 0);
   const episodeId = stringValue(args.episodeId || args.episode || decoded.episodeId || args.nid || '');
@@ -239,7 +322,7 @@ function getResourceVersions(ctx) {
   const detail = getCachedDetail(itemId) || getDetail({ itemId, params: args.params, config: args.config, settings: args.settings });
   const target = findEpisode(detail, episodeId) || firstEpisode(detail);
   if (!target) return { groups: [] };
-  const list = safeEpisodeURL(site, itemId, target.nid || target.id);
+  const list = safeEpisodeURL(site, itemId, target.nid || target.id, token);
   const versions = list.map(function (entry, index) {
     const versionId = encodeVersionId(itemId, target.nid || target.id, entry.resolution || index, index);
     return {
@@ -280,6 +363,9 @@ function getResourceVersions(ctx) {
 function resolvePlayback(ctx) {
   const args = argsify(ctx);
   const site = siteFromArgs(args);
+  const sportsId = stringValue(args.itemId || args.id || args.versionId || args.sourceId).split('|')[0];
+  if (isSportsItemID(sportsId)) return resolveSportsPlayback(site, Object.assign({}, args, { itemId: sportsId }));
+  const token = tokenFromArgs(args);
   const decoded = decodeVersionId(args.versionId || args.id || args.sourceId);
   const direct = stringValue(args.url || args.playUrl || args.videoUrl || (args.ext && args.ext.url));
   const itemId = numberValue(args.itemId || args.id || args.vodId || decoded.itemId || (args.ext && args.ext.vodId), 0);
@@ -289,8 +375,14 @@ function resolvePlayback(ctx) {
   if (isDirectMediaURL(direct)) return playback(site, direct, itemId, nid);
   if (!itemId || !nid) throw new Error('金牌影院播放失败：缺少影片或剧集参数');
 
-  const list = fetchEpisodeURL(site, itemId, nid);
-  const selected = list[selectedIndex] || list[0];
+  const selected = resolveEpisodeSelection(
+    site,
+    itemId,
+    nid,
+    token,
+    selectedIndex,
+    decoded.resolution || (args.ext && args.ext.resolution)
+  );
   if (!selected || !selected.url) throw new Error('金牌影院播放失败：接口没有返回播放地址');
   return playback(site, selected.url, itemId, nid, selected);
 }
@@ -334,8 +426,38 @@ function search(ctx) {
   };
 }
 
-function matchResources() {
-  return { results: [] };
+function matchResources(ctx) {
+  const args = argsify(ctx);
+  const titles = matchCandidateTitles(args).slice(0, 5);
+  const expectedType = expectedMatchType(args);
+  const targetYear = numberValue(args.year || args.releaseYear, 0);
+  const targetSeasonYear = numberValue(args.seasonYear || args.targetSeasonYear, 0);
+  const results = [];
+  const seen = {};
+
+  for (let index = 0; index < titles.length && results.length < 8; index += 1) {
+    const page = search(Object.assign({}, args, { query: titles[index], page: 1 }));
+    (page.items || []).forEach(function (item) {
+      if (!item || seen[item.id]) return;
+      if (expectedType && item.type !== expectedType) return;
+      if ((targetYear || targetSeasonYear) && item.year &&
+          (!targetYear || Math.abs(Number(item.year) - targetYear) > 1) &&
+          (!targetSeasonYear || Math.abs(Number(item.year) - targetSeasonYear) > 2)) return;
+      seen[item.id] = true;
+      results.push(item);
+    });
+    if (results.length > 0) break;
+  }
+
+  return { results };
+}
+
+function matchMovie(ctx) {
+  return matchResources(Object.assign({}, ctx || {}, { mediaType: 'movie' }));
+}
+
+function matchEpisode(ctx) {
+  return matchResources(Object.assign({}, ctx || {}, { mediaType: 'tv' }));
 }
 
 function getCategories() {
@@ -350,7 +472,8 @@ function getCategories() {
       mediaType: channel.mediaType,
       sourceId: WidgetMetadata.id
     };
-  });
+  }).concat([{ id: 'sports', title: '体育直播', name: '体育直播', group: '频道', type: 'folder',
+    kind: 'live', mediaType: 'live', sourceId: WidgetMetadata.id }]);
 }
 
 function getItems(ctx) {
@@ -431,6 +554,236 @@ function getSearch(ctx) {
 
 function onSearch(ctx) {
   return search(ctx || {});
+}
+
+const JBD_SPORTS_UA = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.2 Safari/605.1.15';
+
+// Sports use their own stable identity. A presenter can change matches during the day,
+// so never resolve an old match simply by taking that presenter's current stream.
+function isSportsItemID(value) {
+  return /^sports:\d+:\d+:\d+:\d+$/.test(stringValue(value));
+}
+
+function parseSportsItemID(value) {
+  const match = /^sports:(\d+):(\d+):(\d+):(\d+)$/.exec(stringValue(value));
+  if (!match || Number(match[2]) <= 0) throw new Error('体育赛事参数无效');
+  return { sportId: Number(match[1]), matchId: Number(match[2]), anchorId: Number(match[3]), recordId: Number(match[4]), id: match[0] };
+}
+
+function sportsItemID(raw) {
+  return ['sports', numberValue(raw.sportId, 0), numberValue(raw.matchId, 0), numberValue(raw.anchorId, 0), numberValue(raw.recordId, 0)].join(':');
+}
+
+function sportsAPIData(site, method) {
+  const result = apiGet(site, '/api/mw-movie/anonymous/dqSports/' + method, []);
+  return result && result.data;
+}
+
+function sportsRows(site, includeSchedule) {
+  let rows = [];
+  let firstError = null;
+  let succeeded = false;
+  try {
+    const data = sportsAPIData(site, 'getMatchIndexLiving/v2/web');
+    if (Array.isArray(data)) rows = data;
+    succeeded = true;
+  } catch (error) { firstError = error; }
+  if (includeSchedule) {
+    try {
+      const data = sportsAPIData(site, 'getMatchSchedule/web');
+      const matches = {};
+      rows.forEach(function (row) { matches[row.sportId + ':' + row.matchId] = true; });
+      if (Array.isArray(data)) rows = rows.concat(data.filter(function (row) {
+        return row && !matches[row.sportId + ':' + row.matchId];
+      }));
+      succeeded = true;
+    } catch (error) { if (!firstError) firstError = error; }
+  }
+  if (!succeeded && firstError) throw firstError;
+  const seen = {};
+  return rows.filter(function (row) {
+    if (!row || numberValue(row.matchId, 0) <= 0) return false;
+    const id = sportsItemID(row);
+    if (seen[id]) return false;
+    seen[id] = true;
+    return true;
+  });
+}
+
+function sportsItem(raw) {
+  const id = sportsItemID(raw);
+  const replay = numberValue(raw.recordId, 0) > 0;
+  const active = numberValue(raw.matchStatus, 0) === 2 && numberValue(raw.anchorId, 0) > 0;
+  const state = replay ? '回放' : active ? '直播中' : stringValue(raw.matchStatusName || raw.statusLabel) || '未开播';
+  const title = [stringValue(raw.hostTeamName), stringValue(raw.guestTeamName)].filter(Boolean).join(' vs ') || stringValue(raw.leagueName) || '体育赛事';
+  const art = absoluteImage(raw.leagueLogo || raw.hostTeamLogo || raw.guestTeamLogo || '');
+  return {
+    id, itemId: id, title, name: title,
+    type: replay ? 'movie' : 'live', mediaType: replay ? 'movie' : 'live',
+    poster: art, cover: art, backdrop: art,
+    subtitle: [raw.leagueName, state, raw.anchorNickname].filter(Boolean).join(' · '),
+    overview: [raw.matchTimeStr, raw.statusLabel || raw.matchStatusName, raw.anchorNickname].filter(Boolean).join(' · '),
+    badges: [state, Number(raw.sportId) === 2 ? '篮球' : '足球'],
+    aspectRatio: '16:9', itemAspectRatio: '16:9', imageOrientation: 'landscape', imageFit: 'fit',
+    action: { type: 'detail', id, itemId: id, title, itemAspectRatio: '16:9' },
+    providerIds: { jiabaideSports: id }
+  };
+}
+
+function getSportsSection(site, initialData) {
+  let rows = [];
+  try {
+    if (Array.isArray(initialData)) rows = initialData;
+    else if (initialData && Array.isArray(initialData.data)) rows = initialData.data;
+    else rows = sportsRows(site, false);
+  } catch (error) { rows = []; }
+  return {
+    id: 'jbd-sports', title: '体育直播', style: 'discover.spotlight', lazy: false,
+    moreAction: { type: 'category', id: 'sports', pageId: 'sports', title: '体育直播', itemAspectRatio: '16:9' },
+    items: rows.filter(function (row) { return row && numberValue(row.matchId, 0) > 0; }).map(sportsItem)
+  };
+}
+
+function getSportsCategory(site, args) {
+  args = args || {};
+  const selected = stringValue(args.sort || args.sortBy || args.selectedSortValue || 'all');
+  const sportId = selected === 'football' ? 1 : selected === 'basketball' ? 2 : 0;
+  const page = Math.max(1, Math.floor(numberValue(args.page, 1)));
+  const size = Math.max(1, Math.min(100, Math.floor(numberValue(args.pageSize, 30))));
+  const rows = sportsRows(site, true).filter(function (row) { return !sportId || Number(row.sportId) === sportId; });
+  const options = [
+    { id: 'all', value: 'all', title: '全部赛事' },
+    { id: 'football', value: 'football', title: '足球' },
+    { id: 'basketball', value: 'basketball', title: '篮球' }
+  ];
+  return {
+    pageType: 'category', id: 'sports', title: '体育直播', style: 'media.posterGrid',
+    itemAspectRatio: '16:9', imageOrientation: 'landscape', imageFit: 'fit',
+    items: rows.slice((page - 1) * size, page * size).map(sportsItem), page, hasMore: page * size < rows.length,
+    sort: options, sortOptions: options, selectedSortValue: sportId ? selected : 'all'
+  };
+}
+
+function sportsCurrentRow(site, reference, includeSchedule) {
+  const rows = sportsRows(site, includeSchedule);
+  return rows.filter(function (row) {
+    return Number(row.matchId) === reference.matchId && Number(row.sportId) === reference.sportId
+      && (!reference.anchorId || Number(row.anchorId) === reference.anchorId)
+      && numberValue(row.recordId, 0) === reference.recordId;
+  })[0] || null;
+}
+
+function sportsPageURL(site, reference) {
+  const config = sportsAPIData(site, 'getConfigInfo') || {};
+  const origin = stringValue(config.webDomain).replace(/\/+$/, '');
+  if (!/^https:\/\/[a-z0-9.-]+(?::\d+)?$/i.test(origin)) throw new Error('体育直播站点配置无效');
+  const route = stringValue(config.webLiveLink || '/live/{anchorId}');
+  if (!/^\/[^/]/.test(route) || route.indexOf('{anchorId}') < 0 || /[?#]/.test(route)) throw new Error('体育直播页面配置无效');
+  return origin + route.replace('{anchorId}', String(reference.anchorId))
+    + (reference.recordId ? '?recordId=' + reference.recordId + '&playBack=true' : '');
+}
+
+function sportsPageData(site, reference, row) {
+  if (!reference.anchorId) {
+    row = row || sportsCurrentRow(site, reference, false);
+    if (!row || !numberValue(row.anchorId, 0)) throw new Error('这场赛事尚未提供直播，请在开播后重试');
+    reference = parseSportsItemID(sportsItemID(row));
+  }
+  if (!reference.recordId && row && Number(row.matchStatus) !== 2) {
+    throw new Error(Number(row.matchStatus) === 1 ? '这场赛事尚未开播' : '这场赛事直播已结束，暂无回放');
+  }
+  const pageURL = sportsPageURL(site, reference);
+  const origin = /^https:\/\/[^/]+/i.exec(pageURL)[0];
+  const headers = { 'User-Agent': JBD_SPORTS_UA, Referer: pageURL, Origin: origin, Accept: 'text/html,application/xhtml+xml' };
+  const html = responseText(httpGet(pageURL, headers));
+  const script = /<script\b[^>]*\bid\s*=\s*["']__NEXT_DATA__["'][^>]*>([\s\S]*?)<\/script\s*>/i.exec(html);
+  if (!script) throw new Error('体育直播页面未返回播放数据');
+  const data = parseJSON(script[1]);
+  const page = data && data.props && data.props.pageProps;
+  const live = page && page.liveDetailProp;
+  if (!page || !live) throw new Error('体育直播页面未返回播放数据');
+  if (page.canPlay === false || page.canPlay === 0) throw new Error('这场赛事当前不可播放');
+  if (Number(live.matchId) !== reference.matchId) throw new Error('该主播已切换到其他赛事，请刷新赛事列表');
+  if (reference.recordId) {
+    if (page.playBack !== true || !data.query || Number(data.query.recordId) !== reference.recordId) {
+      throw new Error('这场赛事的回放已不可用');
+    }
+  } else if (page.playBack === true || Number(live.status) !== 1 || live.pushStreamFlag === false || live.isShow === 0) {
+    throw new Error('这场赛事直播尚未开始或已经结束');
+  }
+  const addresses = live.playAddr || {};
+  const keys = reference.recordId ? ['m3u8'] : ['ori_m3u8', 'ud_m3u8', 'hd_m3u8', 'sd_m3u8', 'ld_m3u8'];
+  const names = { m3u8: '赛事回放', ori_m3u8: '原画', ud_m3u8: '超清', hd_m3u8: '高清', sd_m3u8: '标清', ld_m3u8: '流畅' };
+  const choices = keys.filter(function (key) {
+    return /^https:\/\/[^\s"<>]+$/i.test(stringValue(addresses[key]));
+  }).map(function (key) { return { key, title: names[key], url: stringValue(addresses[key]) }; });
+  if (!choices.length) throw new Error(reference.recordId ? '这场赛事暂无可用回放' : '这场赛事暂无可用的 HLS 直播线路');
+  return { reference, pageURL, origin, live, choices };
+}
+
+function sportsVersionGroups(itemId, stream) {
+  return [{ id: 'jbd-sports-quality', title: '播放线路', versions: stream.choices.map(function (choice, index) {
+    const id = itemId + '|' + choice.key;
+    return {
+      id, title: choice.title, quality: choice.title, container: 'm3u8', availability: 'requiresResolve', default: index === 0,
+      action: { type: 'play', itemId, versionId: id, title: stream.live.liveTitle || stream.live.title }
+    };
+  }) }];
+}
+
+function getSportsDetail(site, itemId) {
+  const reference = parseSportsItemID(itemId);
+  let row = null;
+  try { row = sportsCurrentRow(site, reference, !reference.anchorId); } catch (error) { /* The page can still resolve a saved replay. */ }
+  const base = sportsItem(row || reference);
+  base.id = itemId;
+  base.itemId = itemId;
+  base.action = { type: 'detail', id: itemId, itemId, title: base.title };
+  let stream = null;
+  let unavailable = '';
+  if (reference.recordId || (!row && reference.anchorId) || (row && Number(row.matchStatus) === 2)) {
+    try { stream = sportsPageData(site, reference, row); } catch (error) { unavailable = String(error.message || error); }
+  }
+  const title = row ? base.title : stream ? stringValue(stream.live.liveTitle || stream.live.title) || base.title : base.title;
+  const groups = stream ? sportsVersionGroups(itemId, stream) : [];
+  return Object.assign({}, base, {
+    pageType: 'detail', title, name: title, detailImageAspectRatio: '16:9', imageAspectRatio: '16:9',
+    overview: unavailable || base.overview || (reference.recordId ? '体育赛事回放' : '赛事尚未开播或暂无可用直播线路'),
+    facts: [
+      row && row.leagueName ? { title: '赛事', value: String(row.leagueName) } : null,
+      row && row.matchTimeStr ? { title: '开赛时间', value: String(row.matchTimeStr) } : null,
+      { title: '状态', value: reference.recordId ? '回放' : stream ? '直播中' : (row && row.matchStatusName) || '暂不可播放' },
+      row && row.anchorNickname ? { title: '解说', value: String(row.anchorNickname) } : null
+    ].filter(Boolean),
+    seasons: [], resourceGroups: groups, sourceUrl: stream ? stream.pageURL : undefined,
+    providerIds: { jiabaideSports: itemId }
+  });
+}
+
+function getSportsResourceVersions(site, args) {
+  const itemId = stringValue(args.itemId || args.id || args.versionId).split('|')[0];
+  const reference = parseSportsItemID(itemId);
+  let row = null;
+  if (!reference.recordId) row = sportsCurrentRow(site, reference, false);
+  const stream = sportsPageData(site, reference, row);
+  return { itemId, groups: sportsVersionGroups(itemId, stream) };
+}
+
+function resolveSportsPlayback(site, args) {
+  const itemId = stringValue(args.itemId || args.id || args.versionId).split('|')[0];
+  const reference = parseSportsItemID(itemId);
+  let row = null;
+  if (!reference.recordId) row = sportsCurrentRow(site, reference, false);
+  const stream = sportsPageData(site, reference, row);
+  const versionId = stringValue(args.versionId || args.sourceId);
+  const key = versionId.indexOf('|') >= 0 ? versionId.split('|').pop() : '';
+  const selected = stream.choices.filter(function (choice) { return choice.key === key; })[0] || stream.choices[0];
+  const headers = { 'User-Agent': JBD_SPORTS_UA, Referer: stream.pageURL, Origin: stream.origin };
+  return {
+    url: selected.url, videoUrl: selected.url, container: 'm3u8', title: stream.live.liveTitle || stream.live.title || selected.title,
+    quality: selected.title, headers, header: headers, Header: headers,
+    isLive: reference.recordId === 0, streamKind: reference.recordId ? 'vod' : 'live'
+  };
 }
 
 function categoryPage(id, title, mediaType, items, page, hasMore, sortOptions, selectedSortValue) {
@@ -708,7 +1061,7 @@ function safeNewestByType(site, typeId, mediaType) {
 }
 
 function fetchNewestGroups(site, typeId) {
-  const result = apiGet(site, '/api/mw-movie/anonymous/home/newest/list', [
+  const result = apiGet(site, '/mw-movie/anonymous/home/newest/list', [
     ['typeId', String(typeId)]
   ]);
   const groups = ((result && result.data && result.data.allList) || []).map(function (group) {
@@ -723,7 +1076,7 @@ function fetchNewestGroups(site, typeId) {
 }
 
 function listData(site, typeId, sort, pageSize, page) {
-  const result = apiGet(site, '/api/mw-movie/anonymous/video/list', [
+  const result = apiGet(site, '/mw-movie/anonymous/video/list', [
     ['pageNum', String(numberValue(page, 1))],
     ['pageSize', String(numberValue(pageSize, 30))],
     ['sort', String(normalizeSort(sort || '1'))],
@@ -734,14 +1087,14 @@ function listData(site, typeId, sort, pageSize, page) {
 }
 
 function detailData(site, vodId) {
-  const result = apiGet(site, '/api/mw-movie/anonymous/video/detail', [['id', String(vodId)]]);
+  const result = apiGet(site, '/mw-movie/anonymous/video/detail', [['id', String(vodId)]]);
   const data = result && result.data;
   if (!data || !data.vodId) throw new Error('金牌影院详情接口没有返回影片数据');
   return data;
 }
 
 function searchData(site, keyword, page) {
-  const result = apiGet(site, '/api/mw-movie/anonymous/video/searchByWordPageable', [
+  const result = apiGet(site, '/mw-movie/anonymous/video/searchByWordPageable', [
     ['keyword', keyword],
     ['pageNum', String(numberValue(page, 1))],
     ['pageSize', '24'],
@@ -750,50 +1103,107 @@ function searchData(site, keyword, page) {
   return (result && result.data) || {};
 }
 
-function safeEpisodeURL(site, vodId, nid) {
+function safeEpisodeURL(site, vodId, nid, token) {
   try {
-    return fetchEpisodeURL(site, vodId, nid);
+    return fetchEpisodeURL(site, vodId, nid, token);
   } catch (error) {
+    if (token) throw error;
     return [];
   }
 }
 
-function fetchEpisodeURL(site, vodId, nid) {
+function fetchEpisodeURL(site, vodId, nid, token) {
+  if (!token) return fetchAnonymousEpisodeURL(site, vodId, nid);
+
+  const result = apiGet(site, '/mw-movie/anonymous/v2/video/episode/url', [
+    ['clientType', '1'],
+    ['id', String(vodId)],
+    ['nid', String(nid)]
+  ], token);
+  return (result && result.data && result.data.list) || [];
+}
+
+function fetchAnonymousEpisodeURL(site, vodId, nid) {
   const result = apiGet(site, '/api/mw-movie/anonymous/v2/video/episode/url', [
     ['id', String(vodId)],
     ['nid', String(nid)]
   ]);
-  return (result && result.data && result.data.list) || [];
+  const list = (result && result.data && result.data.list) || [];
+  const publicList = list.filter(function (entry) {
+    return entry && (!entry.needLogin || entry.flag);
+  });
+  return publicList.length ? publicList : list.filter(function (entry) {
+    return entry && entry.flag;
+  });
 }
 
-function apiGet(site, path, pairs) {
+function resolveEpisodeSelection(site, vodId, nid, token, selectedIndex, selectedResolution) {
+  const firstList = fetchEpisodeURL(site, vodId, nid, token);
+  const first = selectEpisodeEntry(firstList, selectedIndex, selectedResolution);
+  if (!first || !first.url || !token || !isIPBoundPlaybackURL(first.url)) return first;
+
+  // The API rotates between an IP-bound `whip` URL and an `auth_key` URL.
+  // Request a fresh descriptor, but never consume the temporary media URL here.
+  const refreshedList = fetchEpisodeURL(site, vodId, nid, token);
+  const refreshed = selectEpisodeEntry(refreshedList, selectedIndex, selectedResolution);
+  if (refreshed && refreshed.url && !isIPBoundPlaybackURL(refreshed.url)) return refreshed;
+  return refreshed || first;
+}
+
+function selectEpisodeEntry(list, selectedIndex, selectedResolution) {
+  const entries = Array.isArray(list) ? list : [];
+  const resolution = stringValue(selectedResolution);
+  if (resolution) {
+    const matched = entries.filter(function (entry) {
+      return entry && stringValue(entry.resolution) === resolution;
+    })[0];
+    if (matched) return matched;
+  }
+  return entries[numberValue(selectedIndex, 0)] || entries[0] || null;
+}
+
+function isIPBoundPlaybackURL(url) {
+  return /(?:[?&])whip=[^&]+/i.test(stringValue(url).replace(/&amp;/g, '&'));
+}
+
+function apiGet(site, path, pairs, token) {
   const base = normalizeSite(site);
   const rawQuery = queryString(pairs, false);
   const urlQuery = queryString(pairs, true);
   const t = String(Date.now());
-  const headers = apiHeaders(base, rawQuery, t);
+  const headers = apiHeaders(base, rawQuery, t, token);
   const url = base + path + (urlQuery ? '?' + urlQuery : '');
   const result = httpGet(url, headers);
   const data = parseJSON(responseText(result));
   if (data && data.code && Number(data.code) !== 200) {
+    if (token && Number(data.code) === 99500) {
+      throw new Error('金牌影院登录 Token 已失效，请重新从已登录网页复制 Token');
+    }
     throw new Error((data.msg || '接口返回错误') + ' (' + data.code + ')');
   }
   return data;
 }
 
-function apiHeaders(site, rawQuery, t) {
-  return {
+function apiHeaders(site, rawQuery, t, token) {
+  const headers = {
     'User-Agent': JBD_UA,
     Accept: 'application/json, text/plain, */*',
     Referer: site + '/',
+    'client-type': '1',
     t,
     sign: signQuery(rawQuery, t),
     deviceId: deviceId()
   };
+  if (token) {
+    headers.authorization = token;
+    headers['Cache-Control'] = 'no-cache';
+    headers.Pragma = 'no-cache';
+  }
+  return headers;
 }
 
 function signQuery(rawQuery, t) {
-  return sha1Hex(md5Hex(rawQuery + '&key=' + JBD_SIGN_KEY + '&t=' + t));
+  return sha1Hex(md5Hex((rawQuery ? rawQuery + '&' : '') + 'key=' + JBD_SIGN_KEY + '&t=' + t));
 }
 
 function md5Hex(value) {
@@ -910,12 +1320,31 @@ function siteFromArgs(args) {
   return normalizeSite(source);
 }
 
+function tokenFromArgs(args) {
+  const value =
+    (args && args.params && (args.params.Token || args.params.token || args.params.Authorization)) ||
+    (args && args.config && (args.config.Token || args.config.token || args.config.Authorization)) ||
+    (args && args.settings && (args.settings.Token || args.settings.token || args.settings.Authorization)) ||
+    (args && args.parameters && (args.parameters.Token || args.parameters.token || args.parameters.Authorization)) ||
+    (args && (args.Token || args.token || args.Authorization)) ||
+    '';
+  return normalizeToken(value);
+}
+
+function normalizeToken(value) {
+  let token = stringValue(value).trim();
+  token = token.replace(/^['"]|['"]$/g, '').trim();
+  token = token.replace(/^authorization\s*:\s*/i, '').trim();
+  token = token.replace(/^bearer\s+/i, '').trim();
+  return token;
+}
+
 function normalizeSite(value) {
   let site = stringValue(value || JBD_DEFAULT_BASE).trim();
   if (!site) site = JBD_DEFAULT_BASE;
   if (!/^https?:\/\//i.test(site)) site = 'https://' + site;
   site = site.replace(/\/+$/, '');
-  if (/^https?:\/\/(?:www\.)?jiabaide\.cn$/i.test(site)) return JBD_DEFAULT_BASE;
+  if (/^https?:\/\/(?:m\.|www\.)?jiabaide\.cn$/i.test(site)) return JBD_DEFAULT_BASE;
   return site;
 }
 
@@ -1186,6 +1615,24 @@ function unique(values) {
   });
 }
 
+function matchCandidateTitles(ext) {
+  return unique(
+    []
+      .concat(ext.query || ext.keyword || ext.title || ext.name || [])
+      .concat(ext.originalTitle || ext.originalName || [])
+      .concat(ext.alternativeTitles || [])
+      .concat(ext.searchTitles || [])
+      .concat(ext.titles || [])
+  );
+}
+
+function expectedMatchType(ext) {
+  const mediaType = stringValue(ext.mediaType || ext.type || '').toLowerCase();
+  if (mediaType === 'movie') return 'movie';
+  if (mediaType === 'tv' || mediaType === 'series') return 'series';
+  return '';
+}
+
 function findById(items, id) {
   return (items || []).filter(function (item) {
     return item && item.id === id;
@@ -1233,6 +1680,8 @@ const JiabaideMiniLibrary = {
   resolvePlayback,
   search,
   matchResources,
+  matchMovie,
+  matchEpisode,
   getSearch,
   onSearch,
   getCategories,
@@ -1274,6 +1723,8 @@ if (typeof globalThis !== 'undefined') {
   globalThis.resolvePlayback = resolvePlayback;
   globalThis.search = search;
   globalThis.matchResources = matchResources;
+  globalThis.matchMovie = matchMovie;
+  globalThis.matchEpisode = matchEpisode;
   globalThis.getSearch = getSearch;
   globalThis.onSearch = onSearch;
   globalThis.getCategories = getCategories;

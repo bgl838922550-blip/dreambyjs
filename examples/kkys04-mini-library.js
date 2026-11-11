@@ -1,10 +1,117 @@
 // @name KKYS04 Mini Library
 
-const BASE = 'https://www.kkys04.com';
-const IMAGE_BASE = 'https://vres.rohshz.com';
-const COOKIE_KEY = 'kkys04.cdndefend.cookie';
+const DEFAULT_BASE = 'https://www.kkys20.com';
+let BASE = DEFAULT_BASE;
+const DEFAULT_IMAGE_BASE = 'https://vres.cyscyy.com';
+let IMAGE_BASE = DEFAULT_IMAGE_BASE;
+const COOKIE_KEY_PREFIX = 'kkys04.cdndefend.cookie';
+const IMAGE_BASE_KEY_PREFIX = 'kkys04.image.base';
+const IMAGE_BASE_CACHE_TTL = 6 * 60 * 60 * 1000;
 const UA =
   'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1';
+
+function contextArgs(ctx) {
+  if (!ctx) return {};
+  if (typeof ctx === 'string') {
+    try {
+      return JSON.parse(ctx) || {};
+    } catch (_) {
+      return {};
+    }
+  }
+  return typeof ctx === 'object' ? ctx : {};
+}
+
+function normalizeBaseURL(value) {
+  let base = String(value || DEFAULT_BASE).trim();
+  if (!base) base = DEFAULT_BASE;
+  if (!/^https?:\/\//i.test(base)) base = 'https://' + base;
+  return base.replace(/\/+$/, '');
+}
+
+function baseURLFromContext(ctx) {
+  const args = contextArgs(ctx);
+  const scopes = [args.params, args.config, args.settings, args.parameters, args];
+  for (let index = 0; index < scopes.length; index += 1) {
+    const scope = scopes[index];
+    if (!scope || typeof scope !== 'object') continue;
+    const value = scope.baseURL || scope.base_url || scope.site;
+    if (String(value || '').trim()) return normalizeBaseURL(value);
+  }
+  return DEFAULT_BASE;
+}
+
+function applyConfig(ctx) {
+  BASE = baseURLFromContext(ctx);
+  IMAGE_BASE = cachedImageBase() || DEFAULT_IMAGE_BASE;
+}
+
+function defendCookieKey() {
+  return COOKIE_KEY_PREFIX + '.' + BASE.replace(/^https?:\/\//i, '').replace(/[^a-z0-9.-]+/gi, '_');
+}
+
+function imageBaseCacheKey() {
+  return IMAGE_BASE_KEY_PREFIX + '.' + BASE.replace(/^https?:\/\//i, '').replace(/[^a-z0-9.-]+/gi, '_');
+}
+
+function normalizeImageBase(value) {
+  const url = String(value || '').trim().replace(/\/+$/, '');
+  return /^https?:\/\/[^/]+$/i.test(url) ? url : '';
+}
+
+function cachedImageBase() {
+  const cached = Widget.storage.get(imageBaseCacheKey());
+  if (typeof cached !== 'string' || !cached) return '';
+  try {
+    const record = JSON.parse(cached);
+    return normalizeImageBase(record && record.url);
+  } catch (_) {
+    return normalizeImageBase(cached);
+  }
+}
+
+function refreshImageBase(html) {
+  const cached = Widget.storage.get(imageBaseCacheKey());
+  if (typeof cached === 'string' && cached) {
+    try {
+      const record = JSON.parse(cached);
+      const cachedURL = normalizeImageBase(record && record.url);
+      const updatedAt = Number(record && record.updatedAt);
+      if (cachedURL) IMAGE_BASE = cachedURL;
+      if (cachedURL && updatedAt && Date.now() - updatedAt < IMAGE_BASE_CACHE_TTL) return;
+    } catch (_) {
+      const legacyURL = normalizeImageBase(cached);
+      if (legacyURL) IMAGE_BASE = legacyURL;
+    }
+  }
+
+  const scriptPath = firstMatch(
+    String(html || ''),
+    /<script[^>]+src=["']([^"']*\/rdul\.js(?:\?[^"']*)?)["']/i
+  );
+  if (!scriptPath) return;
+
+  try {
+    const scriptURL = absolute(scriptPath);
+    const result = Widget.http.get(scriptURL, {
+      headers: {
+        'User-Agent': UA,
+        Referer: BASE + '/'
+      }
+    });
+    const script = typeof result.data === 'string' ? result.data : JSON.stringify(result.data || {});
+    const match = /["'](https?:\/\/[^/"']+)["']/i.exec(script);
+    const discovered = normalizeImageBase(match && match[1]);
+    if (!discovered) return;
+    IMAGE_BASE = discovered;
+    Widget.storage.set(
+      imageBaseCacheKey(),
+      JSON.stringify({ url: discovered, updatedAt: Date.now() })
+    );
+  } catch (_) {
+    // Keep the last known image node when the lightweight config request fails.
+  }
+}
 
 function imageHeaders(referer) {
   return {
@@ -36,17 +143,19 @@ function requestURL(url, cookie) {
 
 function fetchText(path) {
   const url = absolute(path);
-  const cached = Widget.storage.get(COOKIE_KEY);
+  const cookieKey = defendCookieKey();
+  const cached = Widget.storage.get(cookieKey);
   const cachedCookie = typeof cached === 'string' ? cached : '';
   let html = requestURL(url, cachedCookie);
   let attempts = 0;
   while (isDefendPage(html) && attempts < 3) {
     const cookie = solveCdndefendCookie(html);
     if (!cookie) break;
-    Widget.storage.set(COOKIE_KEY, cookie);
+    Widget.storage.set(cookieKey, cookie);
     html = requestURL(url, cookie);
     attempts += 1;
   }
+  refreshImageBase(html);
   return html;
 }
 
@@ -513,16 +622,28 @@ function getManifest() {
   return {
     id: 'kkys04',
     name: '可可影视',
-    version: '1.0.0',
+    version: '1.1.1',
     capabilities: {
       search: true,
       aggregation: true,
       playbackHistory: true
-    }
+    },
+    parameters: [
+      {
+        name: 'baseURL',
+        title: '站点地址',
+        type: 'input',
+        value: DEFAULT_BASE,
+        defaultValue: DEFAULT_BASE,
+        required: true,
+        description: '可可影视当前站点地址。站点域名变更后可在这里直接替换。'
+      }
+    ]
   };
 }
 
-function getHome() {
+function getHome(ctx) {
+  applyConfig(ctx);
   const html = fetchText('/');
   const hero = parseCarousel(html);
   const sections = parseHomeSections(html);
@@ -545,6 +666,8 @@ function getHome() {
 }
 
 function getCategory(ext) {
+  ext = contextArgs(ext);
+  applyConfig(ext);
   const pageId = ext.pageId || ext.id || '/';
   const page = Number(ext.page || 1);
   const url = pageId === '/' ? '/' : pageId.replace(/\.html$/, '') + (page > 1 ? '-' + page : '') + '.html';
@@ -566,6 +689,8 @@ function getCategory(ext) {
 }
 
 function getDetail(ext) {
+  ext = contextArgs(ext);
+  applyConfig(ext);
   const itemId = ext.itemId || ext.id || '';
   const html = fetchText(itemId);
   const seasons = parseSeasons(html, itemId);
@@ -706,12 +831,16 @@ function parsePlayGroups(html, itemId, episodeId) {
 }
 
 function getResourceVersions(ext) {
+  ext = contextArgs(ext);
+  applyConfig(ext);
   const itemId = ext.itemId || ext.id || '';
   const html = fetchText(itemId);
   return parsePlayGroups(html, itemId, ext.episodeId || '');
 }
 
 function resolvePlayback(ext) {
+  ext = contextArgs(ext);
+  applyConfig(ext);
   const pageUrl = ext.url || ext.versionId || '';
   const html = fetchText(pageUrl);
   const playSource = /const\s+playSource\s*=\s*\{\s*src:\s*["']([^"']*)["']\s*,\s*type:\s*["']([^"']*)["']/i.exec(html);
@@ -757,6 +886,8 @@ function resolvePlayback(ext) {
 }
 
 function search(ext) {
+  ext = contextArgs(ext);
+  applyConfig(ext);
   const query = encodeURIComponent(ext.query || ext.text || ext.keyword || '');
   const home = fetchText('/');
   const token = firstMatch(home, /name=["']t["']\s+value=["']([^"']+)["']/i);

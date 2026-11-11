@@ -4,7 +4,7 @@ const WidgetMetadata = {
   id: 'live-tv-mini-library',
   name: '电视直播',
   title: '电视直播',
-  version: '1.0.0',
+  version: '1.1.0',
   author: 'baiPlay',
   description: '通过 M3U/M3U8 直播订阅生成自定义媒体库分组，频道点击后直接调用播放器。',
   logo: 'https://i.miji.bid/2025/05/17/c4a0703b68a4d2313a27937d82b72b6a.png',
@@ -307,9 +307,9 @@ async function resolvePlayback(ctx = {}) {
   }
   let playable;
   try {
-    const selected = selectPreferredCandidate(candidates, probeOnly);
-    playable = selected && (selected.huyaResolved || probeOnly) ? selected : resolvePlayableCandidate(selected);
-    markPlaybackCandidateStatus(playable, 'ok');
+    // selectPreferredCandidate has already resolved and checked this URL.
+    // Re-fetching a signed live redirect can return a different/expired link.
+    playable = selectPreferredCandidate(candidates, probeOnly);
   } catch (error) {
     if (!probeOnly) {
       candidates.forEach((candidate) => markPlaybackCandidateStatus(candidate, 'failed'));
@@ -728,7 +728,7 @@ function playbackStatusSuffix(status) {
 
 function playbackStatusBadges(status, lineCount) {
   const badges = ['直播'];
-  if (status === 'ok') badges.push('可播');
+  if (status === 'ok') badges.push('连通');
   if (status === 'failed') badges.push('失效');
   if (lineCount > 1) badges.push(`${lineCount} 线`);
   return badges;
@@ -919,6 +919,11 @@ function selectPreferredCandidate(candidates, probeOnly = false) {
   let firstFailure = '';
 
   for (const candidate of probeTargets) {
+    if (!probeOnly && !/^https?:\/\//i.test(candidate.url)) {
+      // Preserve non-HTTP playback through the App's FFmpeg path, but do not
+      // mark an unprobeable protocol as verified by the HTTP status checker.
+      return candidate;
+    }
     const result = probeCandidate(candidate);
     if (result.ok) {
       markPlaybackCandidateStatus(candidate, 'ok');
@@ -935,7 +940,9 @@ function selectPreferredCandidate(candidates, probeOnly = false) {
 function probeCandidate(candidate) {
   const url = String(candidate.url || '').trim();
   if (!url) return { ok: false, reason: '直播地址为空' };
-  if (!/^https?:\/\//i.test(url)) return { ok: true };
+  if (!/^https?:\/\//i.test(url)) {
+    return { ok: false, reason: '此直播协议无法进行 HTTP 播放探测' };
+  }
 
   try {
     const playable = resolvePlayableCandidate(candidate, true);
@@ -962,6 +969,7 @@ function resolvePlayableCandidate(candidate, probeOnly = false) {
   assertPlayableHTTPResponse(response, url);
   const detectedContainer = containerFromPlaybackResponse(response, url);
   if (detectedContainer !== 'm3u8') {
+    assertMediaResponse(response, url);
     return {
       ...candidate,
       url: response.finalURL || url,
@@ -975,24 +983,29 @@ function resolvePlayableCandidate(candidate, probeOnly = false) {
   }
 
   const playlistURL = response.finalURL || url;
-  const variant = selectHLSVariant(playlist, playlistURL);
-  const resolved = variant
-    ? { ...candidate, url: variant.url, referer: candidate.referer || playlistURL }
-    : { ...candidate, url: playlistURL || url };
+  const variants = rankedHLSVariants(playlist, playlistURL);
+  if (!variants.length) {
+    assertHLSMediaPlaylist(playlist);
+    const playable = { ...candidate, url: playlistURL, container: 'm3u8' };
+    probeFirstHLSSegment(playlist, playable);
+    return playable;
+  }
 
-  const mediaResponse = variant
-    ? fetchProbeResponse(resolved.url, playbackHeaders(resolved), PLAY_PROBE_TIMEOUT)
-    : response;
-  assertPlayableHTTPResponse(mediaResponse, resolved.url);
-  const playable = {
-    ...resolved,
-    url: mediaResponse.finalURL || resolved.url,
-    container: 'm3u8',
-  };
-  probeFirstHLSSegment(mediaResponse.text, playable);
-
-  if (probeOnly) return playable;
-  return playable;
+  let firstFailure = '';
+  for (const variant of variants.slice(0, PLAY_PROBE_LIMIT)) {
+    const resolved = { ...candidate, url: variant.url, referer: candidate.referer || playlistURL };
+    try {
+      const mediaResponse = fetchProbeResponse(resolved.url, playbackHeaders(resolved), PLAY_PROBE_TIMEOUT);
+      assertPlayableHTTPResponse(mediaResponse, resolved.url);
+      assertHLSMediaPlaylist(mediaResponse.text);
+      const playable = { ...resolved, url: mediaResponse.finalURL || resolved.url, container: 'm3u8' };
+      probeFirstHLSSegment(mediaResponse.text, playable);
+      return playable;
+    } catch (error) {
+      if (!firstFailure) firstFailure = error && error.message ? error.message : String(error);
+    }
+  }
+  throw new Error(`直播清晰度均不可用${firstFailure ? `：${firstFailure}` : ''}`);
 }
 
 function resolveHuyaCandidate(candidate, probeOnly = false) {
@@ -1174,7 +1187,7 @@ function fetchText(url, headers, timeout) {
   return fetchTextResponse(url, headers, timeout).text;
 }
 
-function fetchProbeResponse(url, headers, timeout) {
+function fetchProbeResponse(url, headers, timeout, maxBytes = 65536) {
   const probe = Widget.http && typeof Widget.http.probe === 'function'
     ? Widget.http.probe
     : null;
@@ -1182,7 +1195,7 @@ function fetchProbeResponse(url, headers, timeout) {
 
   const response = probe(url, {
     timeout,
-    maxBytes: 4096,
+    maxBytes,
     headers: {
       ...headers,
       Accept: '*/*',
@@ -1200,6 +1213,7 @@ function fetchProbeResponse(url, headers, timeout) {
     ).trim(),
     status,
     headers: response && (response.headers || response.respHeaders || {}),
+    bytesRead: Number(response && response.bytesRead) || 0,
   };
 }
 
@@ -1223,6 +1237,7 @@ function fetchTextResponse(url, headers, timeout) {
     ).trim(),
     status,
     headers: response && (response.headers || response.respHeaders || {}),
+    bytesRead: Number(response && response.bytesRead) || responseDataText(response && response.data).length,
   };
 }
 
@@ -1265,8 +1280,38 @@ function assertPlayableHTTPResponse(response, url) {
   }
 }
 
+function assertMediaResponse(response, url) {
+  assertPlayableHTTPResponse(response, url);
+  const contentType = headerValue(response && response.headers, 'content-type').toLowerCase();
+  const text = String(response && response.text || '').trim();
+  const bytesRead = Number(response && response.bytesRead) || text.length;
+  if (!bytesRead) throw new Error('直播媒体地址没有返回任何数据');
+  if (contentType.startsWith('text/') && !contentType.includes('mpegurl')) {
+    throw new Error(`直播媒体地址返回文本而非媒体流：${playbackErrorPreview(text)}`);
+  }
+  if (text && /^[\x20-\x7e\s]+$/.test(text) && !text.startsWith('FLV')) {
+    throw new Error(`直播媒体地址返回文本而非媒体流：${playbackErrorPreview(text)}`);
+  }
+}
+
+function assertHLSMediaPlaylist(playlist) {
+  const text = String(playlist || '');
+  const lines = text.split(/\r?\n/).map(line => line.trim()).filter(Boolean);
+  const hasFullSegment = lines.some(line => line.startsWith('#EXTINF:')) &&
+    lines.some(line => !line.startsWith('#'));
+  const hasPartialSegment = lines.some(line => line.startsWith('#EXT-X-PART:') && hlsTagAttribute(line, 'URI'));
+  if (!hasFullSegment && !hasPartialSegment) {
+    throw new Error('直播 HLS 清单暂无可播放分片');
+  }
+}
+
 function playbackErrorPreview(value) {
   return String(value || '').replace(/\s+/g, ' ').slice(0, 80);
+}
+
+function hlsTagAttribute(line, name) {
+  const source = String(line || '');
+  return attr(source.slice(source.indexOf(':') + 1), name);
 }
 
 function containerFromPlaybackResponse(response, fallbackURL) {
@@ -1299,6 +1344,10 @@ function containerFromPlaybackResponse(response, fallbackURL) {
 }
 
 function selectHLSVariant(playlist, baseURL) {
+  return rankedHLSVariants(playlist, baseURL)[0] || null;
+}
+
+function rankedHLSVariants(playlist, baseURL) {
   const lines = String(playlist || '').split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
   const variants = [];
 
@@ -1309,9 +1358,9 @@ function selectHLSVariant(playlist, baseURL) {
     if (!uri) continue;
     variants.push({
       url: absolutizeURL(uri, baseURL),
-      bandwidth: Number(attr(line, 'BANDWIDTH') || 0),
-      resolution: attr(line, 'RESOLUTION'),
-      codecs: attr(line, 'CODECS'),
+      bandwidth: Number(hlsTagAttribute(line, 'BANDWIDTH') || 0),
+      resolution: hlsTagAttribute(line, 'RESOLUTION'),
+      codecs: hlsTagAttribute(line, 'CODECS'),
     });
   }
 
@@ -1322,7 +1371,10 @@ function selectHLSVariant(playlist, baseURL) {
     return (right.bandwidth || 0) - (left.bandwidth || 0);
   });
 
-  return variants[0] || null;
+  return variants.filter(variant => {
+    const codecs = String(variant.codecs || '').toLowerCase();
+    return !codecs || !/\bmp4a\b/.test(codecs) || /(avc1|avc3|hvc1|hev1|av01|vp09)/.test(codecs);
+  });
 }
 
 function nextPlaylistURI(lines, startIndex) {
@@ -1340,29 +1392,34 @@ function variantScore(variant) {
   const pixels = match ? Number(match[1]) * Number(match[2]) : 0;
   const codecs = String(variant.codecs || '').toLowerCase();
   let score = pixels;
-  if (codecs.includes('hvc1') || codecs.includes('hev1')) score += 1000;
-  if (codecs.includes('av01')) score -= 1000;
+  // Live TS HEVC/AV1 is less portable than AVC across Apple HLS decoders.
+  // Prefer a known AVC rendition even when a higher-resolution one exists.
+  if (/(avc1|avc3)/.test(codecs)) score += 1_000_000_000;
+  else if (!codecs) score += 500_000_000;
+  else if (codecs.includes('av01')) score -= 1_000_000_000;
   return score;
 }
 
 function probeFirstHLSSegment(playlist, candidate) {
   const lines = String(playlist || '').split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
-  const segment = lines.find((line) => line && !line.startsWith('#'));
+  const map = lines.find(line => line.startsWith('#EXT-X-MAP:') && hlsTagAttribute(line, 'URI'));
+  if (map) probeHLSMediaReference(hlsTagAttribute(map, 'URI'), candidate);
+  const segment = lines.find(line => !line.startsWith('#')) ||
+    hlsTagAttribute(lines.find(line => line.startsWith('#EXT-X-PART:') && hlsTagAttribute(line, 'URI')), 'URI');
   if (!segment) return;
 
+  probeHLSMediaReference(segment, candidate);
+}
+
+function probeHLSMediaReference(segment, candidate) {
   const segmentURL = absolutizeURL(segment, candidate.url);
   if (!/^https?:\/\//i.test(segmentURL)) return;
 
-  const response = Widget.http.get(segmentURL, {
-    timeout: PLAY_PROBE_TIMEOUT,
-    headers: {
-      ...playbackHeaders(candidate),
-      Range: 'bytes=0-0',
-    },
-  });
-  const status = Number(response && response.status ? response.status : 0);
-  if (status && (status < 200 || status >= 400)) {
-    throw new Error(`直播分片返回 HTTP ${status}`);
+  const response = fetchProbeResponse(segmentURL, playbackHeaders(candidate), PLAY_PROBE_TIMEOUT, 512);
+  try {
+    assertMediaResponse(response, segmentURL);
+  } catch (error) {
+    throw new Error(`直播分片不可用：${error && error.message ? error.message : error}`);
   }
 }
 
@@ -1424,6 +1481,7 @@ function candidateScore(candidate) {
   const url = String(candidate.url || '').toLowerCase();
   const container = containerFromURL(url);
   let score = 0;
+  if (!/^https?:\/\//i.test(url)) score += 50;
   if (container === 'm3u8' || container === 'm3u') score -= 30;
   if (url.startsWith('https://')) score -= 4;
   if (/live\.php|\.php\?|\.asp\?|\.aspx\?/i.test(url)) score += 12;

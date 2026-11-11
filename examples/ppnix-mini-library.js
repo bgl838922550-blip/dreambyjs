@@ -4,8 +4,12 @@ const PPNIX_BASE = 'https://www.ppnix.com';
 const PPNIX_LANG = '/cn';
 const PPNIX_HOME = PPNIX_BASE + PPNIX_LANG + '/';
 const PPNIX_LOGO = PPNIX_BASE + '/r/logo.png';
+const PPNIX_AES_KEY_PLACEHOLDER = '__BAIPLAY_PPNIX_AES_KEY__';
 const PPNIX_UA =
   'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1';
+const PPNIX_IPFS_GATEWAY_HOSTS = Array.from({ length: 16 }, function (_, index) {
+  return index + 1 + '.ppnix.com';
+});
 
 const WidgetMetadata = {
   id: 'ppnix-mini-library',
@@ -153,9 +157,9 @@ function getManifest() {
       aggregation: true,
       playbackHistory: true,
       subtitles: true,
-      resourceMatching: false,
+      resourceMatching: true,
       resourceMatch: {
-        enabled: false,
+        enabled: true,
         parameters: [
           'tmdbId',
           'imdbId',
@@ -174,7 +178,7 @@ function getManifest() {
     aggregation: {
       search: true,
       playbackHistory: true,
-      resourceMatching: false
+      resourceMatching: true
     }
   };
 }
@@ -405,6 +409,25 @@ function resolvePlayback(ctx) {
   const result = playback(playURL, detail.sourceUrl || absoluteURL(itemId || ''), itemId || detail.id, args.title || detail.title, buildSubtitles(detail, param));
   result.playlistText = buildPlayablePlaylistText(playURL, result.headers);
   result.playlistBaseURL = playURL;
+  result.playlistAssets = [
+    {
+      match: PPNIX_AES_KEY_PLACEHOLDER,
+      text: fetchPPnixAES128Key(),
+      contentType: 'application/octet-stream',
+      pathExtension: 'key'
+    }
+  ];
+  result.decryptPlaylistSegments = true;
+  result.normalizePlaylistSegments = true;
+  result.segmentURLRewriteRules = [
+    {
+      matchHost: 'ipfs.ppnix.com',
+      hostTemplate: '{n}.ppnix.com',
+      start: 1,
+      end: 16,
+      includeOriginal: false
+    }
+  ];
   return result;
 }
 
@@ -460,8 +483,53 @@ function search(ctx) {
   };
 }
 
-function matchResources() {
-  return { results: [] };
+function matchResources(ctx) {
+  const args = argsify(ctx);
+  const titles = matchCandidateTitles(args).slice(0, 5);
+  const strongTitles = primaryMatchCandidateTitles(args);
+  const expectedType = expectedMatchType(args);
+  const targetYear = numberValue(args.year || args.releaseYear, 0);
+  const targetSeasonYear = numberValue(args.seasonYear || args.targetSeasonYear, 0);
+  const targetSeason = expectedType === 'series'
+    ? Math.max(1, numberValue(args.seasonNumber || args.season, 1))
+    : 0;
+  const results = [];
+  const seen = {};
+
+  for (let index = 0; index < titles.length && results.length < 8; index += 1) {
+    const page = search(Object.assign({}, args, { query: titles[index], page: 1 }));
+    const pageMatches = [];
+    (page.items || []).forEach(function (item) {
+      if (!item || seen[item.id]) return;
+      if (expectedType && item.type !== expectedType) return;
+      const titleScore = ppnixMatchTitleScore(strongTitles, item.title || item.name);
+      if (titleScore < 74) return;
+      const explicitSeason = ppnixMatchSeasonNumber(item.title || item.name);
+      if (targetSeason && explicitSeason && explicitSeason !== targetSeason) return;
+      if ((targetYear || targetSeasonYear) && item.year &&
+          (!targetYear || Math.abs(Number(item.year) - targetYear) > 1) &&
+          (!targetSeasonYear || Math.abs(Number(item.year) - targetSeasonYear) > 2)) return;
+      seen[item.id] = true;
+      pageMatches.push({
+        item,
+        score: titleScore + (targetSeason && explicitSeason === targetSeason ? 48 : 0) +
+          ppnixMatchYearScore(item.year, explicitSeason === targetSeason ? targetSeasonYear : targetYear)
+      });
+    });
+    pageMatches.sort(function (left, right) { return right.score - left.score; });
+    pageMatches.forEach(function (entry) { results.push(entry.item); });
+    if (pageMatches.length > 0) break;
+  }
+
+  return { results };
+}
+
+function matchMovie(ctx) {
+  return matchResources(Object.assign({}, ctx || {}, { mediaType: 'movie' }));
+}
+
+function matchEpisode(ctx) {
+  return matchResources(Object.assign({}, ctx || {}, { mediaType: 'tv' }));
 }
 
 function home(ctx) {
@@ -1115,11 +1183,9 @@ function buildPlayablePlaylistText(playURL, headers) {
     throw new Error('PPnix 播放失败：接口没有返回有效的 M3U8 清单');
   }
 
-  const fixedKey = fetchPPnixAES128Key();
   return raw
-    .replace(/URI=(["'])\.\.\/key\1/gi, 'URI="' + fixedKey + '"')
-    .replace(/URI=\.\.\/key(?=,|$)/gi, 'URI="' + fixedKey + '"')
-    .replace(/https?:\/\/ipfs\.ppnix\.com\/ipfs\//gi, ppnixIPFSGatewayPrefix());
+    .replace(/URI=(["'])\.\.\/key\1/gi, 'URI="' + PPNIX_AES_KEY_PLACEHOLDER + '"')
+    .replace(/URI=\.\.\/key(?=,|$)/gi, 'URI="' + PPNIX_AES_KEY_PLACEHOLDER + '"');
 }
 
 function fetchPPnixAES128Key() {
@@ -1128,23 +1194,7 @@ function fetchPPnixAES128Key() {
   if (key.length !== 16) {
     throw new Error('PPnix 播放失败：AES-128 密钥长度异常');
   }
-  return 'data:application/octet-stream,' + percentEncodeBytes(key);
-}
-
-function ppnixIPFSGatewayPrefix() {
-  return 'https://' + ppnixGatewayIndex() + '.ppnix.com/ipfs/';
-}
-
-function ppnixGatewayIndex() {
-  const hour = Math.floor(Date.now() / 3600000);
-  return (hour % 16) + 1;
-}
-
-function percentEncodeBytes(value) {
-  return String(value || '').replace(/[^A-Za-z0-9_.~-]/g, function (ch) {
-    const code = ch.charCodeAt(0);
-    return '%' + (code < 16 ? '0' : '') + code.toString(16).toUpperCase();
-  });
+  return key;
 }
 
 function fetchList(path, page, contentType) {
@@ -1578,6 +1628,90 @@ function unique(items) {
     out.push(item);
   });
   return out;
+}
+
+function matchCandidateTitles(ext) {
+  return unique(
+    []
+      .concat(ext.query || ext.keyword || ext.title || ext.name || [])
+      .concat(ext.originalTitle || ext.originalName || [])
+      .concat(ext.alternativeTitles || [])
+      .concat(ext.searchTitles || [])
+      .concat(ext.titles || [])
+  );
+}
+
+function primaryMatchCandidateTitles(ext) {
+  const primary = unique(
+    []
+      .concat(ext.title || ext.name || [])
+      .concat(ext.originalTitle || ext.originalName || [])
+  );
+  if (primary.length) return primary.slice(0, 4);
+  return matchCandidateTitles(ext).slice(0, 2);
+}
+
+function ppnixMatchTitleScore(targets, candidate) {
+  const right = ppnixMatchTitleBase(candidate);
+  if (!right) return 0;
+  return (targets || []).reduce(function (best, target) {
+    const left = ppnixMatchTitleBase(target);
+    if (!left) return best;
+    if (left === right) return Math.max(best, 120);
+    const shorter = Math.min(left.length, right.length);
+    const longer = Math.max(left.length, right.length);
+    if (shorter >= 4 && (left.indexOf(right) >= 0 || right.indexOf(left) >= 0)) {
+      const ratio = shorter / Math.max(longer, 1);
+      if (ratio >= 0.66) return Math.max(best, 88 + Math.round(ratio * 12));
+    }
+    return best;
+  }, 0);
+}
+
+function ppnixMatchTitleBase(value) {
+  return cleanText(value)
+    .toLowerCase()
+    .replace(/(?:第\s*[0-9一二三四五六七八九十百]+\s*季|season\s*0*[0-9]+|\bs\s*0*[0-9]+\b)/gi, ' ')
+    .replace(/(?:19|20)[0-9]{2}/g, ' ')
+    .replace(/[\s\u3000'"“”‘’·,，。.!！?？:：;；、|\/\\_+～~\-]/g, '');
+}
+
+function ppnixMatchSeasonNumber(value) {
+  const text = cleanText(value);
+  const match = text.match(/(?:第\s*([0-9一二三四五六七八九十百]+)\s*季|\bseason\s*0*([0-9]{1,3})\b|\bs\s*0*([0-9]{1,3})\b)/i);
+  if (!match) return 0;
+  return numberValue(match[1], ppnixChineseNumber(match[1])) ||
+    numberValue(match[2], 0) || numberValue(match[3], 0);
+}
+
+function ppnixChineseNumber(value) {
+  const text = stringValue(value);
+  const digits = { 一: 1, 二: 2, 三: 3, 四: 4, 五: 5, 六: 6, 七: 7, 八: 8, 九: 9 };
+  if (digits[text]) return digits[text];
+  if (text === '十') return 10;
+  if (text.indexOf('十') >= 0) {
+    const parts = text.split('十');
+    return (parts[0] ? numberValue(digits[parts[0]], 0) * 10 : 10) +
+      (parts[1] ? numberValue(digits[parts[1]], 0) : 0);
+  }
+  return 0;
+}
+
+function ppnixMatchYearScore(actual, target) {
+  const year = numberValue(actual, 0);
+  const expected = numberValue(target, 0);
+  if (!year || !expected) return 0;
+  const difference = Math.abs(year - expected);
+  if (difference === 0) return 24;
+  if (difference === 1) return 12;
+  return -Math.min(24, difference * 4);
+}
+
+function expectedMatchType(ext) {
+  const mediaType = stringValue(ext.mediaType || ext.type || '').toLowerCase();
+  if (mediaType === 'movie') return 'movie';
+  if (mediaType === 'tv' || mediaType === 'series') return 'series';
+  return '';
 }
 
 function dedupeItems(items) {

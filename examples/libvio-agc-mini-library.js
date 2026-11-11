@@ -46,9 +46,9 @@ function getManifest() {
       resourceVersions: true,
       aggregation: true,
       playbackHistory: true,
-      resourceMatching: false,
+      resourceMatching: true,
       resourceMatch: {
-        enabled: false,
+        enabled: true,
         parameters: [
           'tmdbId',
           'imdbId',
@@ -67,7 +67,7 @@ function getManifest() {
     aggregation: {
       search: true,
       playbackHistory: true,
-      resourceMatching: false
+      resourceMatching: true
     },
     parameters: [
       {
@@ -342,16 +342,38 @@ function getSearch(ctx) {
   return search(ctx || {});
 }
 
-function matchResources() {
-  return { results: [] };
+function matchResources(ctx) {
+  const ext = ctx || {};
+  const titles = matchCandidateTitles(ext).slice(0, 5);
+  const expectedType = expectedMatchType(ext);
+  const targetYear = numberValue(ext.year || ext.releaseYear, 0);
+  const targetSeasonYear = numberValue(ext.seasonYear || ext.targetSeasonYear, 0);
+  const results = [];
+  const seen = {};
+
+  for (let index = 0; index < titles.length && results.length < 8; index += 1) {
+    const page = search(Object.assign({}, ext, { query: titles[index], page: 1 }));
+    (page.items || []).forEach(function (item) {
+      if (!item || seen[item.id]) return;
+      if (expectedType && item.type !== expectedType) return;
+      if ((targetYear || targetSeasonYear) && item.year &&
+          (!targetYear || Math.abs(Number(item.year) - targetYear) > 1) &&
+          (!targetSeasonYear || Math.abs(Number(item.year) - targetSeasonYear) > 2)) return;
+      seen[item.id] = true;
+      results.push(item);
+    });
+    if (results.length > 0) break;
+  }
+
+  return { results: results };
 }
 
-function matchMovie() {
-  return matchResources();
+function matchMovie(ctx) {
+  return matchResources(Object.assign({}, ctx || {}, { mediaType: 'movie' }));
 }
 
-function matchEpisode() {
-  return matchResources();
+function matchEpisode(ctx) {
+  return matchResources(Object.assign({}, ctx || {}, { mediaType: 'tv' }));
 }
 
 function fetchTypeList(base, typeId, page, size) {
@@ -679,6 +701,36 @@ function uniqueKeyPairs(items) {
     seen[key] = true;
     return true;
   });
+}
+
+function matchCandidateTitles(ext) {
+  return uniqueStrings(
+    []
+      .concat(ext.query || ext.keyword || ext.title || ext.name || [])
+      .concat(ext.originalTitle || ext.originalName || [])
+      .concat(ext.alternativeTitles || [])
+      .concat(ext.searchTitles || [])
+      .concat(ext.titles || [])
+  );
+}
+
+function expectedMatchType(ext) {
+  const mediaType = stringValue(ext.mediaType || ext.type || '').toLowerCase();
+  if (mediaType === 'movie') return 'movie';
+  if (mediaType === 'tv' || mediaType === 'series') return 'series';
+  return '';
+}
+
+function uniqueStrings(values) {
+  const seen = {};
+  const out = [];
+  (values || []).forEach(function (value) {
+    const text = cleanText(value);
+    if (!text || seen[text]) return;
+    seen[text] = true;
+    out.push(text);
+  });
+  return out;
 }
 
 function extractPlayerData(html) {

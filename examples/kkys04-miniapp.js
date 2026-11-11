@@ -1,16 +1,27 @@
 // @name 可可影视
-// @version 0.1.0
-// @description kkys04.com 小程序源适配器。用于分类海报墙、聚合搜索、详情线路解析。
+// @version 0.2.0
+// @description 可可影视小程序源适配器。用于分类海报墙、聚合搜索、详情线路解析。
 
-const BASE_URL = "https://www.kkys04.com";
+const DEFAULT_BASE_URL = "https://www.kkys20.com";
+let BASE_URL = DEFAULT_BASE_URL;
 const SEARCH_TOKEN = "/8qLaxrdD/v7MRLMqVMDBQ==";
 const USER_AGENT = "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1";
 
 function getConfig() {
   return {
     name: "可可影视",
-    version: "0.1.0",
+    version: "0.2.0",
     searchable: true,
+    parameters: [
+      {
+        name: "baseURL",
+        title: "站点地址",
+        type: "input",
+        value: DEFAULT_BASE_URL,
+        defaultValue: DEFAULT_BASE_URL,
+        required: true
+      }
+    ],
     tabs: [
       { id: "movie", name: "电影", ext: { url: "/channel/1.html" } },
       { id: "series", name: "连续剧", ext: { url: "/channel/2.html" } },
@@ -24,6 +35,7 @@ function getConfig() {
 
 function getCards(ext) {
   ext = argsify(ext);
+  applyConfig(ext);
   const url = absolute(ext.url || "/");
   const html = requestPage(url);
   return { cards: parsePosterCards(html) };
@@ -31,6 +43,7 @@ function getCards(ext) {
 
 function search(ext) {
   ext = argsify(ext);
+  applyConfig(ext);
   const keyword = String(ext.text || ext.query || ext.keyword || "").trim();
   if (!keyword) return { cards: [] };
   const url = BASE_URL + "/search?k=" + encodeURIComponent(keyword) + "&t=" + encodeURIComponent(SEARCH_TOKEN);
@@ -39,6 +52,7 @@ function search(ext) {
 
 function getTracks(ext) {
   ext = argsify(ext);
+  applyConfig(ext);
   const pageURL = absolute(ext.url || ext.href || ext.id);
   const html = requestPage(pageURL);
   const groups = parseTrackGroups(html);
@@ -47,6 +61,7 @@ function getTracks(ext) {
 
 function getPlayinfo(ext) {
   ext = argsify(ext);
+  applyConfig(ext);
   const pageURL = absolute(ext.url || ext.href);
   const html = requestPage(pageURL);
 
@@ -62,14 +77,15 @@ function getPlayinfo(ext) {
 }
 
 function requestPage(url) {
-  let cookie = String($cache.get("kkys04.cookie") || "");
+  const cookieKey = "kkys04.cookie." + BASE_URL.replace(/^https?:\/\//i, "").replace(/[^a-z0-9.-]+/gi, "_");
+  let cookie = String($cache.get(cookieKey) || "");
   for (let attempt = 0; attempt < 3; attempt++) {
     const res = Widget.http.get(url, { headers: defaultHeaders(url, cookie) });
     const html = String(res.data || "");
     if (!isCdndefend(html)) return html;
     cookie = solveCdndefendCookie(html);
     if (!cookie) throw new Error("cdndefend challenge parse failed");
-    $cache.set("kkys04.cookie", cookie);
+    $cache.set(cookieKey, cookie);
   }
   throw new Error("cdndefend challenge retry exceeded");
 }
@@ -179,6 +195,21 @@ function playbackHeaders(pageURL) {
     "Referer": pageURL,
     "Origin": ""
   };
+}
+
+function applyConfig(ext) {
+  ext = ext && typeof ext === "object" ? ext : {};
+  const scopes = [ext.params, ext.config, ext.settings, ext.parameters, ext];
+  let value = "";
+  for (let i = 0; i < scopes.length; i++) {
+    const scope = scopes[i];
+    if (!scope || typeof scope !== "object") continue;
+    value = String(scope.baseURL || scope.base_url || scope.site || "").trim();
+    if (value) break;
+  }
+  if (!value) value = DEFAULT_BASE_URL;
+  if (!/^https?:\/\//i.test(value)) value = "https://" + value;
+  BASE_URL = value.replace(/\/+$/, "");
 }
 
 function absolute(value) {
