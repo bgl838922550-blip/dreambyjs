@@ -33,6 +33,7 @@ Create baiPlay custom mini media libraries as native-data adapters, not web view
 
 1. Define `WidgetMetadata` and `getManifest()`.
    Include stable `id`, readable `name/title`, `version`, `author`, `logo/icon`, `capabilities`, `aggregation`, and any user `parameters`. Use `objectList` for multiple subscriptions or account/API endpoint lists.
+   For authenticated sources, keep the site's login and renewal protocol in JS. Declare refresh credentials as `hidden` parameters and persist a complete replacement session with `Widget.parameters.update(...)`; never log credential values.
 
 2. Build the home page around baiPlay's discover-style sections.
    Return `pageType: "home"`, `hero` or `carousel`, `heroAspectRatio`, and `sections`. Use lazy sections for slow remote data. Each section must return a valid object even on failure; never return `null` or `undefined` from `getHomeSection()`.
@@ -47,7 +48,8 @@ Create baiPlay custom mini media libraries as native-data adapters, not web view
    Return `title`, `type`, `poster`, `backdrop`, `detailImageAspectRatio`, `overview`, `year`, `rating`, `runtimeMinutes`, `genres`, `cast`, `seasons[].episodes[]`, `recommendations`, and optional inline `resourceGroups`. Use image headers/referer fields wherever the source requires anti-hotlinking.
 
 6. Implement resource versions and playback.
-   `getResourceVersions(ctx)` returns groups of playable versions or lines. `resolvePlayback(ctx)` returns only the resource description: `url`, `container`, `headers`, `startPositionSeconds`, `isLive`, and `streamKind`. Do not return or depend on playback strategy fields such as `preferDirectAVPlayer`, `forceDirectAVPlayer`, `playbackStrategy`, or `playerStrategy`; the App chooses the player path.
+   `getResourceVersions(ctx)` returns groups of playable versions or lines. `resolvePlayback(ctx)` returns only the resource description: `url`, `container`, `headers`, `subtitles`, optional `danmaku`, `startPositionSeconds`, `isLive`, and `streamKind`. For supported nonfragmented CENC MP4 with a source-supplied media key, it may also return `mp4Cenc` as described in the protocol; keep keys out of metadata, versions and persisted parameters. Do not return or depend on playback strategy fields such as `preferDirectAVPlayer`, `forceDirectAVPlayer`, `playbackStrategy`, or `playerStrategy`; the App chooses the player path.
+   `getPlaybackProgress(ctx)` and `reportPlaybackProgress(ctx)` are optional source-history hooks. Use them only when the source has its own account progress API. The App always saves local history, throttles progress reports, and treats source failures as non-fatal.
 
 7. Implement search only when supported.
    If manifest declares search support, `search(ctx)` must accept `query`, `keyword`, and `text`, return a standard search page or item array, and make every result open the mini-library detail page.
@@ -58,7 +60,8 @@ Create baiPlay custom mini media libraries as native-data adapters, not web view
 ## Source Handling Rules
 
 - Prefer official JSON/API endpoints or deterministic HTML parsing with correct headers.
-- Do not use a visible browser for ordinary list/detail/search pages. Use `Widget.browser.fetch()` only for real browser-only pages such as Cloudflare verification, player key generation, canvas/sessionStorage/localStorage checks, or media request capture.
+- Do not use a visible browser for ordinary list/detail/search pages. Use `Widget.browser.fetch()` only for real browser-only pages such as Cloudflare verification, source verification forms that a user must complete, player key generation, canvas/sessionStorage/localStorage checks, or media request capture. For source verification forms, use `visible: false` with a specific `verificationSelector` so the App shows the page only when that form is present and returns after the user completes it; do not automate CAPTCHA solving.
+- Choose a verification marker that persists through focus, typing and failed submissions until verification succeeds. Inspect the site's event handlers: initialization classes such as MacCMS `.mac_verify` can disappear on focus while verification is still required. Check these interactions before treating a missing selector as successful verification.
 - If a site is Cloudflare-protected, let normal pages degrade gracefully and keep browser verification scoped to the page that actually needs it.
 - Preserve source-specific request headers, cookies, referers, and user agents. Playback headers belong in `resolvePlayback()`. Image headers belong on items, detail images, cast images, episode stills, or recommendation items.
 - Keep JS responsible for adaptation and parsing. Do not duplicate App UI, App playback decisions, playback history writes, or global search routing inside the script.
@@ -72,7 +75,11 @@ node --check path/to/library.js
 node scripts/validate_mini_library_examples.js
 ```
 
-For source-specific scripts, also run small function calls with local stubs for `$http`, `Widget.http`, `$cache`, or `Widget.vod` when possible. Verify at least:
+For source-specific scripts, also run small function calls with local stubs for `$http`, `Widget.http`, `$cache`, or `Widget.vod` when possible.
+
+For HTTP/API contract tests in this repo, prefer extracting and executing `MiniLibraryService.swift`'s production `hostBootstrapScript` over hand-written `Widget.http` stubs. `Widget.http.get/post/probe` automatically parse valid JSON response bodies into objects or arrays, while HTML remains a string. Adapters must handle these data shapes; converting a JSON object with `String()` produces `[object Object]` and breaks subsequent JSON parsing.
+
+Verify at least:
 
 - `getManifest()` returns valid metadata and capabilities.
 - `getHome()` returns a non-empty page or valid lazy sections.
